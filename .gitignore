@@ -2,6 +2,9 @@ __pycache__/
 .idea/
 logs/
 data/report_quota.json
+# data/daycache/ 是磁盘日缓存（api/core.py 的 cached()）：每个键一份「本进程今天取到的原始结果」，
+# 体积到 MB 级、且换机/换网络后本来就该重新取，所以不入库。删掉整个目录没有后果——下次取数会重建。
+data/daycache/
 # 根目录 indicator.ini 里是**活的凭据**（CoinGlass / CryptoQuant Key、钉钉 SECRET+TOKEN、TG BOT_TOKEN、TradingView 口令）。
 # 这仓库是公开的，deploy_app.sh 又按 `git ls-files` 打上传包，所以它既不入库也不进包；
 # 服务运行本身不读它（口径/阈值都在代码里），需要密钥的取数路径只认环境变量，例如 COINGLASS_KEY。

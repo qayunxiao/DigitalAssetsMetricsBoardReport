@@ -48,8 +48,9 @@ CONFIG_ENV = {("proxy", "http"): "HTTP_PROXY", ("proxy", "https"): "HTTPS_PROXY"
               ("report", "python"): "REPORT_PY", ("report", "crypto_script"): "REPORT_CRYPTO_SCRIPT",
               ("report", "us_script"): "REPORT_US_SCRIPT",
               ("report", "daily_limit"): "REPORT_DAILY_LIMIT",
-              ("report", "us_daily_limit"): "REPORT_US_DAILY_LIMIT"}
-CONFIG_ABS = {"LOG_DIR", "REPORT_CRYPTO_SCRIPT", "REPORT_US_SCRIPT"}
+              ("report", "us_daily_limit"): "REPORT_US_DAILY_LIMIT",
+              ("cache", "day"): "CACHE_DAY", ("cache", "dir"): "CACHE_DIR"}
+CONFIG_ABS = {"LOG_DIR", "CACHE_DIR", "REPORT_CRYPTO_SCRIPT", "REPORT_US_SCRIPT"}
 
 
 def apply_config():
@@ -93,6 +94,10 @@ PUBLIC = (os.environ.get("PUBLIC") or "").strip().lower() in ("1", "true", "yes"
 
 LOG_DIR = os.environ.get("LOG_DIR") or os.path.join(ROOT, "logs")
 LOG_NAME = "board_server.log"
+# 磁盘日缓存（见 cached() 的磁盘层）：进程内 TTL 缓存一重启/一换 Passenger 进程就空了，
+# 而日频指标的上游每天最多变一次。CACHE_DAY=0 时只退回「纯进程内缓存」的老行为。
+CACHE_DIR = os.environ.get("CACHE_DIR") or os.path.join(ROOT, "data", "daycache")
+CACHE_DAY = (os.environ.get("CACHE_DAY") or "1").strip().lower() in ("1", "true", "yes", "on")
 log = logging.getLogger("board")
 _log_ready = False
 
@@ -245,9 +250,74 @@ def remote(url, as_json=False, ms=20000, tag="up", browser_ua=False, headers=Non
     return json.loads(body) if as_json else body
 
 
+# 磁盘日缓存的两条独立用途，别混为一谈：
+#   ①「今天取过就不再取」只给**日频键**——上游一天最多变一次的那些。像 FRED 的 WALCL/TGA
+#     是当天晚些时候才出值、K 线现价与收益率曲线是盘中在动，套这条就会把当天的新值挡在门外。
+#   ②失败兜底给**所有键**：内存里没旧值（进程刚重启 / Passenger 冷起）时，磁盘那份至少比空白强，
+#     页面按数据自带的 asof 标「○ 快照」，不会把滞后值冒充实时。
+DAY_KEYS = ("btc:looknode:", "btc:cbbi", "btc:litb", "btc:ahr999", "btc:fng",
+            "crash:shiller", "crash:buffett")
+_DC_MAX = 4_000_000          # 单个文件上限：超过就不写（alloc10 十年日线也就几百 KB，触到上限说明形状不对）
+
+
+def _dc_file(key):
+    return os.path.join(CACHE_DIR, re.sub(r"[^0-9A-Za-z_.-]", "_", key)[:80] + ".json")
+
+
+def _dc_load(key):
+    """读磁盘上的一项。文件缺失/损坏，或消毒后的文件名撞上了别的键（键对不上），一律当没有。"""
+    try:
+        with open(_dc_file(key), encoding="utf-8") as f:
+            rec = json.load(f)
+    except (OSError, ValueError):
+        return None
+    return rec if isinstance(rec, dict) and rec.get("key") == key and isinstance(rec.get("data"), dict) else None
+
+
+def _dc_save(key, data, ttl):
+    """取数成功后留一份，原子替换。写盘出任何问题只记一行 debug——缓存不许影响功能。"""
+    try:
+        body = json.dumps({"key": key, "ttl": ttl, "ts": time.time(),
+                           "saved_on": date.today().isoformat(),
+                           "saved_at": data.get("cached_at") or "",
+                           "data": data}, ensure_ascii=False)
+        if len(body) > _DC_MAX:
+            log.debug("[cache] %-16s 跳过磁盘缓存：%d 字符超上限", key, len(body))
+            return
+        os.makedirs(CACHE_DIR, exist_ok=True)
+        path = _dc_file(key)
+        with open(path + ".tmp", "w", encoding="utf-8") as f:
+            f.write(body)
+        os.replace(path + ".tmp", path)
+    except OSError as e:
+        log.debug("[cache] %-16s 写磁盘失败（忽略）：%s", key, one_line(e))
+
+
+def daycache_stat():
+    """给 /api/health 用：磁盘上有多少项、多大、其中几个是今天写的（只看 mtime，不解析文件）。"""
+    out = {"enabled": CACHE_DAY, "dir": CACHE_DIR, "items": 0, "bytes": 0, "today": 0}
+    try:
+        names = [n for n in os.listdir(CACHE_DIR) if n.endswith(".json")]
+    except OSError:
+        return out
+    today = date.today().isoformat()
+    for n in names:
+        try:
+            st = os.stat(os.path.join(CACHE_DIR, n))
+        except OSError:
+            continue
+        out["items"] += 1
+        out["bytes"] += st.st_size
+        if datetime.fromtimestamp(st.st_mtime).astimezone().date().isoformat() == today:
+            out["today"] += 1
+    return out
+
+
 def cached(key, ttl, run, force):
     """命中且未过期直接返回；取数失败时退回上一次成功结果（页面据此标「○ 快照」）。
-    同键并发 single-flight：排队者复用先行者结果，不重复打上游。"""
+    同键并发 single-flight：排队者复用先行者结果，不重复打上游。
+    磁盘层见上面 DAY_KEYS 那段注释：日频键当天取过就直接回磁盘值（不打上游），所有键成功后落盘。"""
+    today = date.today().isoformat()
     with cache_lock:
         hit = cache.get(key)
         ver0 = _ver.get(key, 0)
@@ -255,6 +325,15 @@ def cached(key, ttl, run, force):
     if hit and not force and time.time() - hit[0] < ttl:
         log.debug("[cache] %-16s 命中 age=%ds/%ds", key, int(time.time() - hit[0]), ttl)
         return hit[1]
+    if CACHE_DAY and not force and key.startswith(DAY_KEYS):
+        rec = _dc_load(key)
+        if rec and rec.get("saved_on") == today:
+            data = rec["data"]
+            data["disk_saved_on"] = today
+            with cache_lock:
+                cache[key] = (float(rec.get("ts") or 0), data)     # 用原始取数时刻回填，TTL 语义不变
+            log.info("[cache] %-16s 磁盘日缓存命中（今天 %s 已取过，未打上游）", key, today)
+            return data
     t_wait = time.perf_counter()
     with lock:
         with cache_lock:
@@ -276,12 +355,21 @@ def cached(key, ttl, run, force):
                 log.info("[cache] %-16s %s OK %dms（TTL %ds）", key, why, used, ttl)
                 cache[key] = (time.time(), data)
                 _ver[key] = _ver.get(key, 0) + 1
+                if CACHE_DAY:
+                    _dc_save(key, data, ttl)
             elif newest:
                 log.warning("[cache] %-16s %s 失败 %dms: %s → 沿用 %ds 前的旧值（页面标为快照）",
                             key, why, used, data.get("error") or "未知错误",
                             int(time.time() - newest[0]))
                 return newest[1]
             else:
+                rec = _dc_load(key) if CACHE_DAY else None
+                if rec:
+                    log.warning("[cache] %-16s %s 失败 %dms: %s → 沿用磁盘上 %s 取的旧值"
+                                "（内存无旧值，多为进程刚重启；页面按 asof 标为快照）",
+                                key, why, used, data.get("error") or "未知错误",
+                                rec.get("saved_on") or "?")
+                    return rec["data"]
                 log.warning("[cache] %-16s %s 失败 %dms: %s（无旧值可退）",
                             key, why, used, data.get("error") or "未知错误")
         return data
@@ -443,7 +531,7 @@ def health_all():
     return {"ok": True, "mode": "public" if PUBLIC else "local",
             "runtime": "python %s" % sys.version.split()[0],
             "proxy": PROXY or "(未配置)", "config": CONFIG, "config_loaded": HAS_CONFIG,
-            "show_fix": SHOW_FIX, "log_dir": LOG_DIR,
+            "show_fix": SHOW_FIX, "log_dir": LOG_DIR, "daycache": daycache_stat(),
             "modules": sorted(_MODULES),
             "routes": {m: sorted(_MODULES[m]["routes"]) for m in _MODULES},
             "pid": os.getpid(), "booted": datetime.fromtimestamp(_BOOT_TS).astimezone().isoformat(timespec="seconds"),

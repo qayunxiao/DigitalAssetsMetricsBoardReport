@@ -16,10 +16,13 @@
 * **报表正文不落库**：`board_report_run` 只存元数据（谁、何时、成没成、多长），持仓金额那些
   私密内容留在页面上按需展开，不进共享数据库。表结构见 `sql/board_schema.sql`。
 
-命令行（在能连到库的那台机器上跑；本机通常连不到 serv00 的 3306）：
-  python api/db.py --status            看连接参数来源、缺什么、各表行数（只读）
-  python api/db.py --print-sql         把初始化脚本按语句列出来，不连库（本机就能验）
+命令行（在能连到 `[mysql] HOST:PORT` 那台库的机器上跑；HOST=127.0.0.1 就是本机就地建表）：
   python api/db.py --init              建表（幂等，可反复跑）并写 board_meta 版本
+  python api/db.py --status            看连接参数来源、缺什么、各表行数（只读，**不建表**）
+  python api/db.py --print-sql         把初始化脚本按语句列出来，不连库（本机就能验）
+
+不带参数 = 按 `--status` 跑，所以「跑完一张表也没建」是正常结果。自检输出里 `tables` 的
+`null` 表示这张表**不存在**，数字才是行数；建表成功后应看到 board_meta=2、其余 0、version_ok=true。
 """
 import configparser
 import os
@@ -31,7 +34,7 @@ from datetime import date, datetime
 from core import CONFIG, ROOT, log
 
 SCHEMA_FILE = os.path.join(ROOT, "sql", "board_schema.sql")
-LOCAL_CONFIG = os.path.join(ROOT, "local.ini")
+LOCAL_CONFIG = os.path.join(ROOT, "config.ini")
 SCHEMA_VERSION = "1"
 KEY_PREFIX = "btc:"                 # 指标历史序列的命名空间，与 board_series_daily 注释一致
 TABLES = ("board_meta", "board_indicator_daily", "board_series_daily",
@@ -51,15 +54,23 @@ _conn_for_test = None  # 只给离线自检用的注入点（见 README 的验�
 # ---------------------------------------------------------------- 配置
 
 def _layers():
-    """按优先级返回 [(层名, ConfigParser 或 None)]：环境 > local.ini > config.ini。"""
+    """按优先级返回 [(层名, ConfigParser 或 None)]：环境 > `local.ini` > `config.ini`。
+
+    层名取自文件名本身（不是写死的两个标签），所以 `LOCAL_CONFIG` 指到哪个文件、来源就显示哪个；
+    两层路径相同时只留一份，免得 `password_from` 报成一个目录里并不存在的文件名。
+    """
     out = [("环境变量", None)]
-    for name, path in (("local.ini", LOCAL_CONFIG), ("config.ini", CONFIG)):
+    seen = set()
+    for path in (LOCAL_CONFIG, CONFIG):
+        if path in seen:
+            continue
+        seen.add(path)
         cp = configparser.ConfigParser(interpolation=None)
         try:
             cp.read(path, encoding="utf-8-sig")
         except OSError:
             continue
-        out.append((name, cp))
+        out.append((os.path.basename(path), cp))
     return out
 
 
@@ -361,22 +372,33 @@ def r_health(q):
 ROUTES = {"health": r_health}
 
 
+def _print_status(s):
+    for k, v in s.items():
+        print("%-14s %s" % (k, v))
+
+
 def _cli(argv):
-    if "--print-sql" in argv:
+    a = [x.lower() for x in argv]
+    if "--print-sql" in a:
         for i, s in enumerate(schema_statements(), 1):
             print("-- [%d] %s" % (i, s.splitlines()[0][:78]))
         return 0
-    if "--init" in argv:
+    if "--init" in a:
         r = init_schema()
         print(r)
+        if not r.get("ok"):
+            print("建表没成功：原因见上面 error。口令来源是 %s；本地 root 的口令填对才过得了 1045。"
+                  % (db_config()["password_from"] or "(没读到)"))
         return 0 if r.get("ok") else 1
-    if "--status" in argv:
-        s = status(quiet=False)
-        for k, v in s.items():
-            print("%-14s %s" % (k, v))
-        return 0 if s.get("ok") else 1
-    print(__doc__)
-    return 0
+    if "--help" in a or "-h" in a:
+        print(__doc__)
+        return 0
+    if "--status" not in a:
+        print("没带参数，按 --status 跑一次只读自检。三个开关：--print-sql（只列建表语句，不连库）"
+              " / --init（建表，幂等） / --status（本命令）；看完整说明：--help\n")
+    s = status(quiet=False)
+    _print_status(s)
+    return 0 if s.get("ok") else 1
 
 
 if __name__ == "__main__":

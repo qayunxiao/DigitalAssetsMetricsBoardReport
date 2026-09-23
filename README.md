@@ -58,8 +58,10 @@ DigitalAssetsMetricsBoard/
 │   └── USStockCrashMonitor/   原 Streamlit 版归档（_legacy/，README.md 为旧版说明）
 ├── utils/                     cryptoTrader `utils/` 的仓库内只读副本（含 `operationMysql.py`），对照用、不参与 import，见 7.3
 ├── sql/board_schema.sql       落库表结构（6 张表），`python api/db.py --init` 就是逐句执行它
+├── INTODB.md                  落库地图：哪些指标真入库、哪些只存元数据、哪些完全不落库、哪些走日缓存
 ├── data/risk_history.csv      崩盘页每日评分累积（同日覆盖）
 ├── data/report_quota.json     两个持仓报告的当日点击计数（crypto/us 各记各的，跨天自动作废，限次见 [report]）
+├── data/daycache/             磁盘日缓存：每个缓存键一份「今天取到的原始结果」（见 7.4，可整目录删除）
 ├── logs/board_server.log      午夜轮转，保留 14 天
 └── Qoder.md                   给 agent 的项目约定（审计提示词、硬性纪律、边界）
 ```
@@ -95,6 +97,7 @@ DigitalAssetsMetricsBoard/
 | `[log]` | `dir` / `level` | `LOG_DIR` / `LOG_LEVEL` | `logs`（相对项目根）/ `INFO`（DEBUG 含缓存命中明细，每日轮转留 14 天） |
 | `[page]` | `show_fix` | `SHOW_FIX` | `1`；控制页面底部「修订记录」块，由服务端替换 HTML 标记 `{{SHOW_FIX}}` 实现，一次刷新即生效 |
 | `[report]` | `python` / `crypto_script` / `us_script` / `daily_limit` / `us_daily_limit` | `REPORT_PY`（两个 kind 共用解释器）/ `REPORT_CRYPTO_SCRIPT` / `REPORT_US_SCRIPT` / `REPORT_DAILY_LIMIT` / `REPORT_US_DAILY_LIMIT` | 覆盖两个报告脚本的路径（留空 = 按 OS 用内置默认）与各自每天可点次数（默认加密 `3`、美股 `2`）。本机 `python` 已填 cryptoTrader 自己的 venv（`E:/UserTools/py311_envs/WEB3/Scripts/python.exe`，含 openpyxl/pandas/requests；系统 python 缺 openpyxl，用它跑加密报表只会得到「无数据」） |
+| `[cache]` | `day` / `dir` | `CACHE_DAY` / `CACHE_DIR` | 磁盘日缓存（`api/core.py` 的 `cached()`）。`day=0` 整层关掉 = 回到「缓存只在进程内存里」的老行为；`dir` 相对项目根（`data/daycache`，已 gitignore，删掉无后果）。为什么要有这层见 7.4 |
 | `[mysql]` | `ENABLE` / `HOST` / `PORT` / `USER` / `PASSWD` / `DADABASES` / `CHARSET` / `STORE_BTC` / `STORE_SERIES` / `STORE_RISK` / `STORE_REPORT` | `MYSQL_HOST` / `MYSQL_PORT` / `MYSQL_USER` / `MYSQL_PASSWD` / `MYSQL_DATABASE` / `MYSQL_CHARSET` / `MYSQL_ENABLE` / `MYSQL_STORE_BTC` / `MYSQL_STORE_SERIES` / `MYSQL_STORE_RISK` / `MYSQL_STORE_REPORT` | **整段可选的落库层**，见 7.3。`ENABLE=0` 或 `HOST/USER/DADABASES/PASSWD` 任缺其一 = 完全不连库，页面照常有数。键名 `DADABASES` 是出处项目（cryptoTrader）的原始拼写，保留兼容。四个 `STORE_*` 分别关掉「12 项日读数 / 历史序列 / 崩盘评分 / 报表留痕」，都只在 `ENABLE=1` 时有效 |
 
 新增配置项需同时登记 `api/core.py` 的 `CONFIG_ENV`、`config.ini` 注释与本表。**例外：`[mysql]` 走 `api/db.py` 自己的解析（环境变量 > `local.ini` > `config.ini`），不进 `CONFIG_ENV`**——它要在缺 `pymysql` 时也照常启动，不能让 core 去 import 一个第三方包。
@@ -103,7 +106,7 @@ DigitalAssetsMetricsBoard/
 
 ## 5. 接口契约（/api/*）
 
-全部只读，除 `crash/record` 外不写盘。统一响应含 `ok` 字段；`force=1` 跳过缓存强拉上游（页头「刷新」按钮即走此路径）。通用探活：`GET /api/health` 返回 mode（local/public）/runtime/proxy/config/modules。
+全部只读，除 `crash/record` 外不写业务数据盘。统一响应含 `ok` 字段；`force=1` 跳过缓存强拉上游（页头「刷新」按钮即走此路径，磁盘日缓存也照样穿透，见 7.4）。通用探活：`GET /api/health` 返回 mode（local/public）/runtime/proxy/config/modules/daycache（磁盘日缓存有多少项、多大、今天写了几项）。
 
 ### /api/btc（`api/btc.py` · BTC 指标页）
 | 端点 | 说明 |
@@ -251,16 +254,44 @@ stdout 也只在按需展开时显示；约束只有 `[report] daily_limit`（�
 四条口径值得单独记：① 全部 `utf8mb4`（`verdict`/`note`/`error` 里有中文和上下标）；② 序列按业务日 UPSERT，页面每 15 分钟自动刷一次，不做幂等库里就全是同一天的重复行、历史曲线直接废掉；③ 进程内还有一层「值没变就不再打库」的指纹（上游一天只更新一次，所以一天通常只写一遍）；④ 表结构是**长表**而非每项一列，新增指标不必改表——这是刻意的，12 项变 13 项不该牵扯 DDL。
 
 ```bash
-# 建表：必须在能连到 3306 的那台机器上跑（本机 Windows 连不到 serv00 的 mysql11.serv00.com:3306）
-/home/myaibtc/vevns/web3/bin/python api/db.py --init      # 幂等，可反复跑
-python api/db.py --print-sql                              # 本机就能看：只列 9 条语句，不连库
-python api/db.py --status                                 # 连接参数来源 + 缺什么 + 各表行数（只读）
+# 建表：在「能连到那台 3306」的机器上跑。[mysql] 现在指向本机（HOST=127.0.0.1），所以 Windows 就地建：
+python .\api\db.py --init            # 幂等，可反复跑
+python .\api\db.py                   # 再跑一次自检，确认 tables 全变成数字、version_ok True
+# 服务器上那套库（mysql11.serv00.com：本机实测连不到它的 3306，就在服务器上说），换它的解释器：
+/home/myaibtc/vevns/web3/bin/python api/db.py --init
+python api/db.py --print-sql         # 只列 9 条语句、不连库（本机就能核对 SQL）
+python api/db.py --help              # 完整说明
 ```
 `--init` 就是把 `sql/board_schema.sql` 逐句执行（`SET NAMES` + 6 个 `CREATE TABLE IF NOT EXISTS` + 2 个版本戳 UPSERT，共 9 条），所以脚本本身可以拿 `mysql -h mysql11.serv00.com -u <user> -p <db> < sql/board_schema.sql` 手工跑，两条路结果一致。切到落库前确认 `pymysql` 在 venv 里（`/home/myaibtc/vevns/web3/bin/python -m pip install pymysql`），没装的话它整段空转、不报错。
+
+**只有 `--init` 会动库**：不带参数 = 按 `--status` 跑只读自检（不会建表，这是刻意的——自检命令该能随时敲），所以「跑完没建表」是正确结果，不是故障。看输出认状态：`tables` 里 `null` = 这张表**不存在**，数字 = 这张表的行数；`version_ok false` 在表没建时同样是必然结果。建表成功后再自检，应看到 `board_meta 2` + 其余五张 `0` + `version_ok true`。
+
+**逐指标的清单在 `INTODB.md`**：哪 12 项真进库、哪几张表只存元数据、哪些页面一行都不写、哪些键走日缓存，那份文件按接口逐个列全（含当前实际行数状态）。本节只讲机制与边界。
 
 **为什么不用 `utils/operationMysql.py`**（cryptoTrader 那份 2019 年的封装，仓库内有只读副本）：三条实测理由，任一条都足以让它在服务进程里崩掉——① 它调 `OperationConfig.getMysqlConfig()`，而那个类**根本没有这个方法**（只有 `get_testenv_mysql`），装了 pymysql 也是 `AttributeError`；② 它读的是 `config/config.ini`，本仓库没有 `config/` 目录（配置在根 `config.ini`）；③ 它在 `import` 期就要 pymysql、且 `exec_updata()` 执行完把连接关掉——Web 进程里一次写入断一次连接不可接受。所以那份文件按 `api/Crypto/` 同规矩处理：**只读对照，不 import、不改**。
 
 离线自证（本机没有库也能验 SQL 与参数）：桩连接注入 `db._conn_for_test` + 把 `socket.socket.connect` 换成抛异常 + 断言本机无 `pymysql`，三重之下 9 条建表语句、`store_btc` 的 run_log→读数→序列 executemany、同日同值第二次调用零新增语句、`status()` 响应体不含口令/账号/主机名，全部逐条打印核对过。
+
+### 7.4 磁盘日缓存（`cached()` 的第二层，2026-09-23 新增）
+
+**要解决的问题**：TTL 缓存活在一个进程的内存里。本机版一重启、公网版 Passenger 一收进程（空闲就退，一天若干次），缓存就空了，下一个访客又要现场打 8~23 秒上游。而这些上游里有一批**一天只变一次**——同一天里第 N 次请求和第 1 次请求拿到的是同一份数据，纯属重复劳动。
+
+**做法**：取数成功后在 `data/daycache/<键>.json` 落一份原始结果（含 `saved_on`），两层行为故意不同：
+
+| 层 | 哪些键 | 行为 |
+|---|---|---|
+| ①「今天取过就不再取」 | `btc:looknode:*`（MVRV/CVDD）、`btc:cbbi`、`btc:litb`、`btc:ahr999`、`btc:fng`、`crash:shiller`、`crash:buffett` | 当天已有磁盘文件 → 直接回那份，**一次上游都不打**；日志 `[cache] <键> 磁盘日缓存命中（今天 … 已取过，未打上游）` |
+| ②只做失败兜底 | 其余全部（FRED 各序列、`btc:klines`、`mkt:*`、`crash:yields`、`alloc10:*`…） | 照常按 TTL 打上游；只在**取数失败且内存里没有旧值**时退回磁盘那份，日志写「沿用磁盘上 X 取的旧值」 |
+
+第②层为什么不也给 FRED 它们开①：这些键盘中还会变（WALCL/TGA 是当天晚些时候才发布），拿①挡就等于把当天的新值关在门外——那与本项目「绝不把滞后值冒充实时」的纪律冲突。
+
+三条设计取舍，改这段代码前先看清：
+
+- **`force=1` 永远穿透**。页头「刷新」与卡片「重试」走的就是这条路，所以这层不会挡住任何东西；`[cache] day=0` 是整层关闭的总闸。
+- **失败不写盘**。失败结果一个字节都不落（否则 AHR999 这种三条上游全挂的会被钉在磁盘上一整天，把后来修好的机会也挡掉）。
+- **不做「只取当天那一个点」**。这些上游本来就是一次回整段历史（looknode 回 5910 个点、K 线回 499 根），没有「只给今天」的端点，所以省下的是**整次调用**、不是把响应变小；也没做「按日期从 `board_series_daily` 拼回 hist 再补当天一点」——那要改 12 个 builder 的取数形状，换来的收益与①完全重叠。按天累积的权威在 MySQL（7.3），跨进程/跨重启的快速路径在这堆 JSON 里，两份各司其职。
+
+`GET /api/health` 的 `daycache` 字段是 `{enabled, dir, items, bytes, today}`（只看目录里各文件的 mtime，不解析内容），用来一眼确认这层有没有在干活。换机时 `data/daycache/` 可整目录拷走，也可直接删——下次取数自动重建。离线自证同 7.3（`socket.connect` 全程封死，假 `run()` 只数被调用几次）：日频键当天第二次调用 `run()` 次数为 1、`force=1` 时增 1、非日频键过期后仍为 2、冷进程 + 失败能退到磁盘那份、失败不落盘、`day=0` 时整层空转。
 
 ## 8. 故障排查
 
@@ -280,6 +311,9 @@ python api/db.py --status                                 # 连接参数来源 +
 | 公网版点报告回 `未知接口 /api/allocation/report`（404） | 内存里是旧 Python：HTML 每请求现读、`api/*.py` 只在进程启动时 import，所以传了新包也必须 `touch tmp/restart.txt` 才换代码。`curl -s .../api/health` 看 `stale`（true＝盘上 .py 比进程新）与 `routes.allocation` 有没有 `report`；`stale=true` 就再摸一次 restart.txt，仍不变说明摸错了目录（`deploy_app.sh` 三个候选 `tmp/` 都会摸） |
 | 双击 HTML 直接打开 | 无 `/api` 同源中转，页面按内置快照展示且 `{{SHOW_FIX}}` 不生效——属预期，请走 `http://127.0.0.1:8888/...` |
 | 怀疑数值新旧 | 看 `logs/board_server.log`：`[http]` 行有耗时/字节；回退旧值会写 `[cache] … 沿用 Ns 前的旧值` |
+| 上游换了但页面「刷新」后没变 | 先看是不是**日频项 + 当天已取过**：`grep "磁盘日缓存命中" logs/board_server.log` 有痕迹。页头「刷新」与卡片「重试」都带 `force=1`，照旧穿透；还不放心就删 `data/daycache/` 里对应键的文件（或整目录），下一轮自动重建 |
+| 上游全挂、页面却给出一整串数字 | 看角标：`○ 快照` 就是旧值（7.4 的②层：冷进程 + 取数失败时退回磁盘那份）。拿不到日期才显示「取数失败」，本服务不会把滞后值标成实时 |
+| 跑 `python api\db.py` 一张表也没建 | 正确行为：不带参数 = 只读的 `--status`，只有 `--init` 会执行 DDL。判状态看 `tables`：`null` = 表不存在，数字 = 行数（`version_ok false` 同因）|
 | 卡片有数但库里没行 | 先看 `curl -s http://127.0.0.1:8888/api/db/health`：`enabled=false` 时 `reason` 直接说要补哪一项（缺 HOST/USER/DADABASES，或「没有口令」）；`enabled=true` 而 `tables` 全 `null` = 还没建表，跑 `api/db.py --init`；有表但行数是 0 = 那个 venv 没装 pymysql（日志里是 `[db] 没装 pymysql，本轮跳过入库`，页面不受影响）。`switches` 里某项 false 也会整段不写那一类 |
 | 同一天看到多行同指标 | 不该出现：每个写入都按业务日 UPSERT。若真出现了，先确认库里的表是本版 `sql/board_schema.sql` 建的（`board_meta.schema_version` 应为 `1`、`/api/db/health` 的 `version_ok` 为 true）——缺 `UNIQUE(metric_key,date)` 的旧表要手工 `DROP TABLE` 后 `--init` 重建 |
 | 双击 HTML 直接打开 | 无 `/api` 同源中转，页面按内置快照展示且 `{{SHOW_FIX}}` 不生效——属预期，请走 `http://127.0.0.1:8888/...` |
@@ -299,6 +333,7 @@ python api/db.py --status                                 # 连接参数来源 +
 | 文档 | 内容 |
 |---|---|
 | 本 README | 项目全貌、启动、配置、接口、部署、排障（落库层见 7.3） |
+| `INTODB.md` | 落库地图（逐指标）：A 层 12 项进库、B 层只存分数与执行痕迹、C 层完全不入库、D 层日缓存，附核对方法与当前行数状态 |
 | `sql/board_schema.sql` | 6 张表的 DDL 与逐列注释，`api/db.py --init` 逐句执行它；改表结构只改这个文件并升 `board_meta.schema_version` |
 | `Qoder.md`（根） | agent 约定：宏观审计提示词、输出规范、硬性纪律、边界 |
 | `api/Liquidity/README.md` | 流动性模块详档：接口契约、13 项判级阈值表、实测取数约束、待补锚点 |
