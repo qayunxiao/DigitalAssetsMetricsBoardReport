@@ -7,10 +7,6 @@
 #   bash deploy_app.sh --zip [包]   用上传的 damb-public-*.zip 装机，完全不碰 git（离线退路）
 #   bash deploy_app.sh --force-data 连 data/report_quota.json 与 data/risk_history.csv 一起覆盖
 #
-# 装机之后固定还有一步 **5.5 覆盖层**：把 `$HOME` 下的 `allocation.py`、`config.ini` 盖到站点。
-# 这两份含只在服务器上改、不进仓库的内容；清单用 `OVERLAY="名字:站点相对路径 ..."` 换，`OVERLAY=""` 整层关掉。
-# 顺序不能调：放在装机循环之前会被 `git ls-files` 那遍原样盖回去（曾经 cp 成功、效果归零）。
-#
 # 装机来源跟他的 cryptoTrader 脚本一个路子：仓库常驻 `~/vevns/<仓库名>`，有 .git 就更新、没有就 clone，
 # 然后把 `git ls-files` 列出来的跟踪文件铺到 Passenger 站点根（$SITE）。
 #
@@ -20,8 +16,7 @@
 # 关于「python 服务有没有启动」：Passenger 是按需拉起的，站点空闲时 `ps` 里一个进程都没有，
 # 所以不能拿 ps 当判据。这里以面板 `devil www list` 的 running/stopped 为准，
 # 再叠一个「站点根有没有 api/app.py」判断到底部署过没有。
-# 本脚本只写 $SITE 和 $HOME/vevns 下这两个仓库；除 5.5 覆盖层**只读** $HOME 下 OVERLAY 列的那两份之外，
-# 不读也不写别的应用。
+# 本脚本只碰 $SITE 和 $HOME/vevns 下这两个仓库，绝不碰别的应用。
 #
 # 私有仓库第一次要有凭证（token 当密码），跑一次这两行、再跑本脚本即可：
 #   git config --global credential.helper store
@@ -51,9 +46,6 @@ REPO_URL="${REPO_URL:-https://github.com/qayunxiao/DigitalAssetsMetricsBoardRepo
 REPO_DIR="${REPO_DIR:-$HOME/vevns/$(basename "${REPO_URL%.git}")}"
 CRYPTO_REPO="${CRYPTO_REPO:-https://github.com/qayunxiao/cryptoTrader.git}"
 CRYPTO_DIR="${CRYPTO_DIR:-$HOME/vevns/cryptoTrader}"    # 持仓报告按钮真跑的就是这里的两个 tests/*.py
-# 覆盖层：只在服务器上改、不进仓库的敏感文件。格式「$HOME 下的名字:$SITE 下的名字」，空格分隔可列多组。
-# 故意用 ${VAR-默认}（不带冒号）：`OVERLAY=""` 就是显式关掉整层，`${OVERLAY:-}` 会把空值当没设。
-OVERLAY="${OVERLAY-allocation.py:api/allocation.py config.ini:config.ini}"
 
 MODE="git"; SYNC=1; FORCE_DATA=0; ZIP=""
 while [ $# -gt 0 ]; do
@@ -140,7 +132,7 @@ else
   if [ -f "$SITE/config.ini" ]; then
     bak="$SITE/config.ini.bak.$(date +%Y%m%d-%H%M%S)"
     cp -p "$SITE/config.ini" "$bak"
-    echo "    config.ini 先用仓库那份覆盖，旧的留在 $bak（5.5 覆盖层随后会用 \$HOME/config.ini 再盖回来）"
+    echo "    config.ini 用仓库那份覆盖，旧的留在 $bak（服务器上调过 limit 的话从这儿抄回去）"
   fi
   n=0; keep=0; skip=0
   while IFS= read -r -d '' f; do
@@ -164,6 +156,14 @@ else
   fi
 fi
 
+# ---------- 3.5 用 $HOME 下那两份替换站点上的仓库版 ----------
+# 位置不能往前提：这两份都是 git 跟踪文件，放在上面的装机循环之前会被 `cp -p $REPO_DIR/$f` 原样盖回去，
+# cp 返回 0 但效果归零。用不带 -p 的 cp，mtime=此刻，面板的 stale 才不会被骗成 false。
+echo "=== 3.5 覆盖 allocation.py 与 config.ini ==="
+cp /home/myaibtc/allocation.py "$SITE/api/allocation.py"
+cp /home/myaibtc/config.ini    "$SITE/config.ini"
+echo "    ok  两份都已换成 \$HOME 下那一份"
+
 [ -f "$SITE/api/app.py" ] || { echo "!! 站点根没有 api/app.py，装机没成功（包/仓库不对？）" >&2; exit 1; }
 
 if [ "$MODE" != "reload" ]; then
@@ -182,27 +182,6 @@ if [ "$MODE" != "reload" ]; then
   touch "$SITE/.deployed"
 fi
 
-# ---------- 5.5 覆盖层：$HOME 下那两份敏感文件，必须排在装机之后 ----------
-# allocation.py 与 config.ini 里有只在服务器上改、不进仓库的内容，仓库那份是旧的。
-# 位置很关键：铺在装机循环之前会被上面那遍 `cp -p $REPO_DIR/$f` 原样盖回去（老版本就这么白干一趟，
-# cp 返回 0、效果归零，还会把你要的那份当成「站点旧文件」备份进 config.ini.bak.*）。
-# 源不在只警告不掀桌（本脚本 set -e，一句 cp 失败会连重载和冒烟都跑不到）；`OVERLAY=""` 可整层关掉。
-echo "=== 5.5 覆盖层（\$HOME → 站点，在装机之后、重载之前）==="
-for ov in $OVERLAY; do
-  tgt="${ov##*:}"; s="$HOME/${ov%%:*}"; d="$SITE/$tgt"
-  if [ ! -f "$s" ]; then
-    echo "    ⚠ 跳过 $tgt：源 $s 不存在，站点保留仓库版"
-  elif [ ! -f "$d" ]; then
-    echo "    ⚠ 跳过 $tgt：站点上还没有 $d（装机没铺到？自己确认下路径写对没有）"
-  elif cmp -s "$s" "$d"; then
-    echo "    $tgt 与源已一致，未动"
-  else
-    # 不用 cp -p：保留源 mtime 会让 core._code_stamp() 以为「盘上没比进程新的 .py」而把 stale 报成 false，
-    # 换了代码却提示不用重启。这里要的就是 mtime=此刻。
-    cp "$s" "$d" && echo "    已覆盖 $tgt ← $s"
-  fi
-done
-
 # ---------- 4. 重载：Passenger 没有「启动」这一步，摸 restart.txt 即热重载 ----------
 echo "=== 6. 重载 Passenger ==="
 mkdir -p "$SITE/tmp" "$SITE/public_python/tmp" "$DOCROOT/tmp"
@@ -215,17 +194,6 @@ fi
 echo "=== 7. 冒烟 ==="
 "$VENV_PY" -V
 if [ -n "$sync_failed" ]; then echo "    ⚠ $sync_failed"; fi
-# 覆盖层留痕：走完 5.5 之后站点那两份应与 $HOME 源逐字节一致；不一致基本就是顺序又被挪回装机之前了
-for ov in $OVERLAY; do
-  tgt="${ov##*:}"; s="$HOME/${ov%%:*}"; d="$SITE/$tgt"
-  if [ ! -f "$s" ]; then
-    echo "    覆盖层校验 $tgt：源 $s 不存在，跳过"
-  elif cmp -s "$s" "$d"; then
-    echo "    覆盖层校验 $tgt：✓ 站点与 \$HOME 源一致"
-  else
-    echo "    ⚠ 覆盖层校验 $tgt：✗ 站点那份和 $s 不一样（5.5 是否还在装机之后？）"
-  fi
-done
 if command -v curl >/dev/null 2>&1; then
   h="$(curl -s -m 30 "$URL/api/health" || true)"
   echo "    $(printf %s "$h" | grep -o '"mode": *"[a-z]*"' || echo '/api/health 没拿到 mode（应用没起来，看首页诊断文本）')"

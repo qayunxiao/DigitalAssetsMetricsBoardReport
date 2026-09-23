@@ -13,8 +13,7 @@ def build(warm=True):
     liquidity 与 btc 的 warm 只在本地版跑：前者预热 ccxt 的 load_markets，后者预热 12 项上游。"""
     import liquidity
     import crash
-    import allocation
-    import db
+    from api import allocation
     import btc
     import db
 
