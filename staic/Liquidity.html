@@ -1,0 +1,803 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>全球宏观流动性监控台 · 2026-09-21 审计</title>
+<meta name="description" content="美联储净流动性、回购管道压力与高风险资产末端信号的风控审计仪表盘，数据取自 FRED / 纽约联储官方序列。">
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="common.css">
+<script>try{document.documentElement.dataset.theme=localStorage.getItem("board-theme")||"dark"}catch(e){}</script>
+<style>
+  /* 页面特有版式；公共样式（顶栏/卡片/面板/chips 等）在 common.css */
+  .dt.up{color:#e8a33d}.dt.dn{color:#6db3d4}
+  .dt b{font-weight:600}
+  .formula s{text-decoration:none;color:var(--red)}
+
+  /* filter / 修订记录 */
+  .rev{background:rgba(232,163,61,.055);border:1px solid #3b3320;border-left:3px solid var(--amber);
+    border-radius:8px;padding:13px 16px;margin-bottom:16px;font-size:12.5px;color:var(--tx2);line-height:1.75}
+  .rev b{color:var(--amber);font-weight:600}
+  #revs[data-show="0"]{display:none}   /* 由 config.ini 的 [page] show_fix 决定；直接双击打开文件时标记未替换，按展示处理 */
+  .revhead{margin-top:14px;cursor:pointer;transition:border-color .15s}
+  .revhead:hover{border-color:var(--line2)}
+  .revbtn{all:unset;display:flex;align-items:center;gap:8px;width:100%;cursor:pointer}
+  .revbtn:focus-visible{outline:2px solid var(--amber);outline-offset:-4px;border-radius:6px}
+  .revbtn .car{color:var(--tx3);transition:transform .18s}
+  .revbtn[aria-expanded="false"] .car{transform:rotate(-90deg)}
+  #revbody[data-open="0"]{display:none}
+
+  /* chain */
+  .chain{display:grid;grid-template-columns:repeat(auto-fit,minmax(288px,1fr));gap:14px}
+  .link{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px 19px}
+  .link .idx{font-family:var(--mono);font-size:11px;color:var(--gold);letter-spacing:.1em;margin-bottom:9px}
+  .link h3{font-size:15px;font-weight:600;margin-bottom:11px;font-family:Georgia,serif}
+  .link p{font-size:13px;color:var(--tx2);margin-bottom:10px}
+  .link p strong{color:var(--tx);font-weight:600}
+
+  /* SOP */
+  .sop{border-color:#4a2124;background:linear-gradient(180deg,rgba(242,85,90,.06),transparent 60%)}
+  .act{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:11px;margin-top:15px}
+  .step{background:#0b0c0d;border:1px solid var(--line);border-radius:8px;padding:14px 15px;display:flex;gap:12px}
+  .step .n{width:23px;height:23px;flex:0 0 23px;border-radius:50%;background:var(--red);color:#160b0c;
+    font-size:12px;font-weight:700;display:grid;place-items:center;font-family:var(--mono)}
+  .step div p{font-size:12.5px;color:var(--tx2);margin-top:4px}
+  .step h4{font-size:13.5px;font-weight:600;color:var(--tx)}
+  .trig{display:grid;grid-template-columns:repeat(auto-fit,minmax(255px,1fr));gap:11px;margin-top:13px}
+  .trig div{border:1px dashed #3a3320;border-radius:8px;padding:13px 15px;background:rgba(212,175,55,.045)}
+  .trig b{font-size:11px;letter-spacing:.1em;color:var(--gold);display:block;margin-bottom:6px}
+  .trig p{font-size:12.5px;color:var(--tx2)}
+  .trig .num{color:var(--tx);font-weight:600}
+
+  /* gaps */
+  .gaps{background:#0b0c0d;border:1px solid #3b3320;border-radius:9px;padding:15px 17px}
+  .gaps li{font-size:12.5px;color:var(--tx2);margin-left:17px;padding:3px 0}
+  .gaps li b{color:var(--amber);font-weight:600}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="bar">
+    <div class="brand"><b>Lattice</b><span>Macro Liquidity Desk</span></div>
+    <div class="asof num" id="asof"></div>
+    <div class="lbar"><button class="rf" id="rf" type="button">↻ 刷新实时</button><span class="ls" id="livestat">实时同步中…</span></div>
+    <nav class="tabs" id="tabs" aria-label="报告分区导航"></nav>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <!-- 综合评级 -->
+  <div class="verdict">
+    <div class="vcard alert">
+      <div class="vlabel">系统综合风险评级</div>
+      <div class="vbig"><span class="pulse"></span>🔴 高危</div>
+      <div class="vsub" id="v-sub">评级构成由实时序列重新判级。</div>
+    </div>
+    <div class="vcard">
+      <div class="vlabel">首席风控官指令</div>
+      <div class="vbig" style="color:var(--gold)">逢高减仓</div>
+      <div class="vsub">向防守资产转移，<b>严禁加仓</b>。非清仓恐慌离场：失业率未触发萨姆规则、管道无挤兑，本轮是<b>主动紧缩式下行</b>。</div>
+    </div>
+    <div class="vcard">
+      <div class="vlabel">主导变量</div>
+      <div class="vbig" style="font-size:22px">FOMC 加息 25bp</div>
+      <div class="vsub">政策利率 <span class="num">3.75–4.00%</span>，为 <b>2023 年 7 月以来首次</b>。定价从「降息交易」硬切至「加息交易」。</div>
+    </div>
+  </div>
+
+  <!-- 1 看板 -->
+  <section id="board">
+    <div class="shead"><h2>① 实时核心指标看板</h2><span class="tagline">最近官方观测值 9/16–9/18</span><div class="rule"></div></div>
+    <div class="filters" id="filters" role="group" aria-label="按风险状态筛选"></div>
+    <div class="grid" id="grid"></div>
+  </section>
+
+  <!-- 概览行 -->
+  <div class="trio" style="margin-bottom:34px">
+    <div class="panel" style="max-width:520px">
+      <h3>评级构成</h3>
+      <div class="ph" style="margin:0 0 13px">11 项指标风险分布</div>
+      <div id="riskbar"></div>
+    </div>
+    <div class="panel" style="max-width:620px">
+      <h3>一句话结论</h3>
+      <div class="ph">不是危机，而是转向</div>
+      <p style="font-size:13.5px;color:var(--tx2)">流动性危机（管道挤兑、利差飙升、机构违约）<b style="color:var(--green)">尚未发生</b>。
+      但<b style="color:var(--red)">主动紧缩已经启动</b>：政策利率反转 + 财政抽水 + 缓冲垫归零，三者叠加使净流动性进入下行通道。
+      这种组合下，高风险资产的定价锚从「流动性溢出」切换为「融资成本」，<b>减仓优于承受波动</b>。</p>
+      <div style="margin-top:11px"><span class="tagn">领先指标全红</span><span class="tagn">滞后指标仍绿</span><span class="tagn">9/30 为验证日</span></div>
+    </div>
+  </div>
+
+  <!-- 2 净流动性 -->
+  <section id="net">
+    <div class="shead"><h2>② 净流动性测算</h2><span class="tagline">WALCL − TGA − ON RRP</span><div class="rule"></div></div>
+    <div class="duo">
+      <div class="panel">
+        <h3>净流动性周度轨迹 <span class="risk r-hi" id="net-tag" style="position:static;margin-left:auto">—</span></h3>
+        <div class="ph">单位：十亿美元 · 近 5 个周三（FRED 官方周三水位序列）</div>
+        <div id="netChart"></div>
+        <div class="legend">
+          <span><i style="background:var(--gold)"></i>净流动性</span>
+          <span><i style="background:#4a6f8a"></i>TGA 抽水（堆叠）</span>
+        </div>
+        <div class="formula" id="netFormula"></div>
+      </div>
+      <div class="panel">
+        <h3>量价背离判定</h3>
+        <div class="ph" id="net-verdict">最新读数计算中…</div>
+        <div id="waterfall"></div>
+        <div class="note bad"><b>减震器已消失。</b>分子端（总资产）横盘，全部收缩压力来自 TGA 回补这一「财政蓄水」效应。ON RRP 归零意味着<b>未来每一次财政发债抽水，都将 1:1 直接扣减银行准备金</b>。</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3 管道 -->
+  <section id="pipe">
+    <div class="shead"><h2>③ 回购管道压力测试</h2><span class="tagline">SOFR − IORB 利差</span><div class="rule"></div></div>
+    <div class="duo">
+      <div class="panel">
+        <h3>政策利率与资金价格 <span class="risk r-lo" id="pipe-tag" style="position:static;margin-left:auto">—</span></h3>
+        <div class="ph">% · 9/8 → 9/17，9/17 为加息落地后首个观测</div>
+        <div id="rateChart"></div>
+        <div class="legend">
+          <span><i style="background:#6db3d4"></i>SOFR</span>
+          <span><i style="background:var(--gold)"></i>IORB（政策锚）</span>
+        </div>
+      </div>
+      <div class="panel">
+        <h3>读数：绿灯，但两处必须打折</h3>
+        <div class="ph">指标干净 ≠ 系统安全，只说明冲击尚未到达管道层</div>
+        <div class="kv"><span>当前利差</span><span class="num" id="pipe-spread">—</span></div>
+        <div class="kv"><span>加息前利差（9/16）</span><span class="num">3.62% − 3.65% = −3bp</span></div>
+        <div class="kv"><span>9/17 单日 SOFR 跳升</span><span class="num" style="color:var(--amber)">+23bp</span></div>
+        <div class="note">1. 该利差是<b>滞后指标</b>，加息仅落地 4 个交易日，融资成本抬升的完整传导尚未反映。<br>2. SOFR 单日跳至 3.85%，说明<b>资金价格已经上台阶</b>。</div>
+        <div class="note bad"><b>真正压力测试窗口：9/30 季末</b>（缴款 + 季度国债结算 + 月末叠加日）。</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4 金丝雀 -->
+  <section id="canary">
+    <div class="shead"><h2>④ 末端金丝雀</h2><span class="tagline">折现率 × 风险偏好</span><div class="rule"></div></div>
+    <div class="trio">
+      <div class="panel">
+        <h3>US10Y 长端压力 <span class="risk r-hi" id="y10-tag" style="position:static;margin-left:auto">—</span></h3>
+        <div class="ph">% · 美国财政部每日收益率曲线 CSV（经本地服务实时取数）</div>
+        <div id="y10Chart"></div>
+        <div class="note" id="y10-note">读取财政部序列…</div>
+      </div>
+      <div class="panel">
+        <h3>BTC：末端风险偏好 <span class="risk r-md" id="btc-tag" style="position:static;margin-left:auto">—</span></h3>
+        <div class="ph">美元 · ccxt 多所实时中位价（下方读数自动刷新）</div>
+        <div class="kv"><span>实时中位价</span><span class="num" id="btc-live">加载中…</span></div>
+        <div class="kv"><span>相对 60 日高点</span><span class="num" id="btc-vs" style="color:var(--green)">—</span></div>
+        <div class="kv"><span>数据源（可达）</span><span class="num" id="btc-src">—</span></div>
+        <div class="kv"><span>本月以来 / 本季度以来</span><span class="num" id="btc-perf">—</span></div>
+        <div class="kv"><span>120 / 200 日均线</span><span class="num" id="btc-vs-ma" style="color:var(--amber)">计算中…</span></div>
+        <div class="note bad"><b>本审计中被更正的一项：</b>原判断「冲高 81,300 未能站稳 80,000、需求端失血」基于 <b>9/20 的新闻报价 $78,000（滞后两天）</b>。实时价站上 81,300 前高，<b>该结论作废</b>。真实读数是：BTC 在 10Y 破 5% 的同时<b>逆势创阶段新高</b>——末端金丝雀<b>没有报警</b>。</div>
+      </div>
+      <div class="panel">
+        <h3>通胀与就业：紧缩闭环</h3>
+        <div class="ph">8 月官方数据，9/10–9/11 公布</div>
+        <div id="inf-live"><!--PPI/CPI/PCE/失业/零售 实时回填--></div><div class="note"><b>因果闭环：</b>通胀再加速 + 劳动力不弱 + 需求有韧性 → <b>美联储无降息空间，只能继续紧缩</b> → 净流动性收缩 + 折现率上行 → 高风险资产首当其冲。</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 5 因果链 -->
+  <section id="chain">
+    <div class="shead"><h2>⑤ 底层因果链条</h2><span class="tagline">三条独立证据链交叉指向同一结论</span><div class="rule"></div></div>
+    <div class="chain">
+      <div class="link">
+        <div class="idx">链 A · 财政抽水</div>
+        <h3>TGA 暴力回补 → 净流动性单周失血</h3>
+        <p id="c-a">—</p>
+        <p id="c-a2">—</p>
+        <span class="tagn">TGA +148B/w</span><span class="tagn">RRP ≈ $0</span><span class="tagn">净流动性 本月最低</span>
+      </div>
+      <div class="link">
+        <div class="idx">链 B · 政策转向</div>
+        <h3>通胀再加速封死降息，加息落地</h3>
+        <p id="c-b">—</p>
+        <p>9 月 FOMC 加息 25bp 至 3.75–4.00%，点阵图指向年内「低 4%」。<strong>核心 CPI 同比回落至 2.4% 不足以逆转</strong>——环比 0.3% 仍在抬头。</p>
+        <span class="tagn">首次加息自 2023/07</span><span class="tagn">IORB 3.65→3.90</span><span class="tagn">dot plot 低4%</span>
+      </div>
+      <div class="link">
+        <div class="idx">链 C · 资产端确认 <span style="color:var(--amber)">— 信号分歧</span></div>
+        <h3>折现率端强化，风险偏好端反证</h3>
+        <p id="c-c1">—</p>
+        <p>Yardeni 于 9/16 <strong>下调标普目标价并要求「谨慎前行」</strong>，机构端确在降低风险预算。</p>
+        <p id="c-c2">—</p>
+        <p>市场第一反应是「加息靴子落地即买入」，而非资金外逃。</p>
+        <p><strong>如何处理这一分歧：</strong>不推翻评级，但把 BTC 从「确认信号」降级为「<strong>与流动性背离的抢跑反弹</strong>」。链 A（财政抽水）与链 B（政策转向）为周频/政策级事实，不随两日币价波动失效；而风险偏好是<strong>结果变量</strong>，不能反过来否定原因。</p>
+        <span class="tagn">US10Y 收 5.01</span><span class="tagn">BTC 创新高（反证）</span><span class="tagn">S&amp;P 目标下调</span><span class="tagn">信号分歧</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 6 SOP -->
+  <section id="sop">
+    <div class="shead"><h2>⑥ 首席风控官操盘指引</h2><span class="tagline">黑纸白字 · 谢绝模糊</span><div class="rule"></div></div>
+    <div class="panel sop">
+      <h3 style="font-size:16px">执行清单：逢高减仓并转向防守 — 严禁加仓</h3>
+      <div class="ph">评级依据：政策方向已反转、缓冲垫已消失、财政大规模抽水、长端逼近 5%、末端需求萎缩</div>
+      <div class="act">
+        <div class="step"><div class="n">1</div><div><h4>加密：仍减至原敞口 30–50%，但改「等回调卖」为「当前价上方分批卖」</h4><p>价格已站上 81,300 前高，原「阻力带卖出」的挂单位置失效，改为<strong>即时分批执行</strong>。<strong>清掉所有合约、杠杆与资金费率套利</strong>——加息 25bp 直接重定价杠杆融资成本，这一条与币价涨跌无关。注意：本轮反弹是<strong>与净流动性背离</strong>的抢跑，历史上这类反弹不改变紧缩周期的资产路径。</p></div></div>
+        <div class="step"><div class="n">2</div><div><h4>高贝塔成长 / 长久期科技：减仓</h4><p>10Y 破 5% 是其估值的直接杀手。机构已下调目标价并降低风险预算。</p></div></div>
+        <div class="step"><div class="n">3</div><div><h4>权益总仓位：停止加仓，不清仓</h4><p>新增资金 100% 停止流入权益。<b>非恐慌离场</b>——萨姆未触发、零售强劲、管道无挤兑。指令为<b>降杠杆、降贝塔</b>。</p></div></div>
+        <div class="step"><div class="n">4</div><div><h4>现金与短端：提升配置</h4><p>无风险收益率约 3.62–3.85%（FFR 低位 / SOFR），短期国债提供<b>正收益且零风险的避难选项</b>。当前唯一「无脑正确」的头寸。</p></div></div>
+        <div class="step"><div class="n">5</div><div><h4>不付高成本买尾部保护</h4><p>管道利差健康 → VIX 类对冲偏贵。改为<b>通过降低仓位本身管理风险</b>，更便宜且更有效。</p></div></div>
+      </div>
+
+      <h3 style="margin-top:24px;font-size:14px">再承担风险的客观触发条件（三者至少满足其二）</h3>
+      <div class="trig">
+        <div><b>TRIGGER 01 · 流动性</b><p>利差稳定为负 <span class="num">且 TGA 回落至 <span class="num">$850B 以下</span></span>（净流动性回升 $100B+）；<br>若 SOFR−IORB 转正并走阔至 <span class="num">+10bp</span> 以上 → <b>进一步减仓，不是加仓</b>。</p></div>
+        <div><b>TRIGGER 02 · 折现率</b><p>10Y 有效跌破 <span class="num">4.70%</span>，估值折现压力解除。</p></div>
+        <div><b>TRIGGER 03 · 通胀</b><p>核心 PPI 同比回落至 <span class="num">4.0% 以下</span> 且月率不高于 <span class="num">0.2%</span>，生产端通胀确认降温，美联储转向可期。</p></div>
+      </div>
+      <div class="note" style="margin-top:16px"><b>新增监测项（因链 C 分歧而加设）：</b>若 BTC 继续走强<strong>且</strong> SOFR−IORB 保持为负<strong>且</strong> TGA 未回落，说明市场在定价「加息即最后一次」——那是对链 B 的挑战，届时应以 <strong>PPI/CPI 是否转向</strong>为准，而不是以币价为准。<strong>反之，若 BTC 涨而利差转正，立刻执行清单第 1、2 条，不等待。</strong></div>
+      <div class="note bad" style="margin-top:12px"><b>下一检查点：9/30（季末缴款 + 国债结算叠加日）</b>——监测 SOFR 是否单日跳升至 IORB 之上。那将是本框架下第一个真正的系统性警报。</div>
+    </div>
+  </section>
+
+  <!-- 7 数据缺口 -->
+  <section id="gaps">
+    <div class="shead"><h2>⑦ 检索缺口与诚实声明</h2><span class="tagline">未经一手核验的项目不作编造</span><div class="rule"></div></div>
+    <ul class="gaps" role="list">
+      <li><b>取数架构已改：全部 11 项走实时</b>。页面 → 本地合并服务（根目录 <span class="num">main.py</span>，取数逻辑 <span class="num">api/liquidity.py</span>）的 <span class="num">/api/liquidity/*</span> → 代理（地址见 <span class="num">config.ini</span>）→ FRED／财政部／交易所。浏览器自己直取仍然不行：FRED 与纽约联储<strong>不返回 CORS 头</strong>，代理能解决网络可达却解决不了 CORS，所以必须有一层同源中转。因此本页<strong>必须由本地服务提供</strong>，直接双击打开 HTML 会退回 9/21 快照并在每张卡片上标注。</li>
+      <li><b>取数层已按用户要求改为 Python</b>（<span class="num">fetch_server.py</span>，仅用标准库，无需 pip 安装）。实时化过程中踩到一个坑：FRED 边缘节点会按<strong>请求头画像</strong>挂起连接——只带 <span class="num">User-Agent + Accept</span> 的简洁请求在 Python 侧一律读超时，补齐 <span class="num">Accept-Language／Accept-Encoding／Cache-Control</span> 后 1–3 秒返回；同一 URL 用 curl、Node 则正常。这是取数语言相关、而非数据相关的差异，记录在此以免下次再被误读成「FRED 不可达」。另外 FRED 对<strong>并发</strong>请求会限流并返回 HTML，故上游取数用全局锁串行（12 个序列串行约 11 秒，并发则全军覆没）。代理走 <span class="num">HTTP/HTTPS</span>（CONNECT），SOCKS5 同端口可用但标准库需第三方扩展，未启用。</li>
+      <li><b>已解决 · BTC 的 120/200 日均线与本期涨跌</b>：行情与日线改由 <span class="num">ccxt</span> 取（<span class="num">binance／okx／bybit／kraken／gate／coinbase</span> 逐家试，成功者参与中位数，日线取第一家 ≥200 根的交易所并 6 小时缓存一次）。实测本机出口下 <b>binance 返回 451（地区封锁）、bybit 返回 403</b>，故中位数实际由 okx／kraken／gate／coinbase 四家构成——卡片上显示的可达源数量会随网络浮动，这是真实值而非固定五源。均线按 <span class="num">MA = 最近 120/200 个日收盘均值（剔除当天未收盘）</span> 计算；<b>「本月以来／本季度以来」涨跌改为按上一个自然月／季度最后一个收盘价实算</b>，此前写死的「9 月 −1.5% / Q3 +32%」是媒体转述值，与实算结果不符，已删除。</li>
+      <li><b>已更正 · PPI 口径</b>：初版把媒体转述的「终需 PPI 5.4%／核心 4.6%」当实时值。现改为官方序列 <span class="num">WPSFD49201</span>（PPI 终端需求）与 <span class="num">PPIACO</span>（全部商品）各自计算同比／环比。两者口径不同、数值不同，卡片上标明序列名；<span class="num">PPIFD</span> 序列在 FRED 已 404，故弃用。</li>
+      <li><b>SOFR 官方源仍缺</b>：纽约联储 <span class="num">/api/rates/...</span> 与 <span class="num">/static/api/rates/sofr/...</span> 经代理分别返回 404／400／空，因此 SOFR 取自 <span class="num">FRED SOFR</span>（同源同值，但为次日发布）。这是当前唯一的取数绕路。</li>
+      <li><b>频率错配未消除</b>：WALCL／TGA 为周频（周三，周四发布），RRP／SOFR／10Y 为日频（次日发布），IORB 为会期频，CPI／PPI／PCE／失业率／零售为月频。<strong>刷新页面只刷新「已发布」的最新值，不会让周频数据变日频</strong>。所以取数按天、结论复核按周。</li>
+      <li><b>官方序列里的缺测值必须剔除</b>：FRED UNRATE 的 <span class="num">2025-10</span> 记为 <span class="num">0</span>（BLS 因政府停摆未发布该月数据）。若不剔除，萨姆规则的 12 个月低点会被拉成 0，差值虚高至 4.13pp，<b>直接误判为「已触发」</b>。页面现按 <span class="num">v &gt; 0</span> 过滤并在卡片上注明剔除了哪个月——这是实时化过程中发现的一个真实陷阱，不是假设。</li>
+      <li><b>TGA 口径</b>：周均值 <span class="num">WTREGEN $877.0B</span> 与周三水位 <span class="num">WDTGAL $991.7B</span> 不同。净流动性测算用与 WALCL 同周三对齐的 <strong>WDTGAL</strong>。</li>
+      <li><b>风险判级已改为代码规则</b>：阈值公开在「评级构成」面板下方，刷新即按最新数据重新判级——评级不再是手写结论，因此可能与上一版不同。</li>
+      <li><b>上一版的两处数据错误保留记录</b>：① BTC 曾填 9/20 新闻价 $78,000（滞后两天且未标注降级），实时约 $81,300；② US10Y 曾止于 9/17 的 4.94%（FRED 未发布 9/18），财政部官方 9/18 收 <span class="num">5.01%</span>。</li>
+    </ul>
+  </section>
+
+  <!-- 8 来源 -->
+  <section id="src">
+    <div class="shead"><h2>⑧ 数据来源</h2><span class="tagline">FRED / 纽约联储 / 美联储 H.4.1 / 权威财经媒体</span><div class="rule"></div></div>
+    <div class="panel">
+      <div class="srcs">
+        <a href="https://fred.stlouisfed.org/series/WALCL" target="_blank" rel="noopener">FRED · WALCL 美联储总资产</a>
+        <a href="https://fred.stlouisfed.org/series/WDTGAL" target="_blank" rel="noopener">FRED · WDTGAL TGA 周三水位</a>
+        <a href="https://fred.stlouisfed.org/series/SOFR" target="_blank" rel="noopener">FRED · SOFR 隔夜担保融资利率</a>
+        <a href="https://fred.stlouisfed.org/series/CPILFESL" target="_blank" rel="noopener">FRED · CPILFESL 核心 CPI</a>
+        <a href="https://fred.stlouisfed.org/series/PCEPILFE" target="_blank" rel="noopener">FRED · PCEPILFE 核心 PCE</a>
+        <a href="https://fred.stlouisfed.org/series/WPSFD49201" target="_blank" rel="noopener">FRED · WPSFD49201 PPI 终端需求</a>
+        <a href="https://fred.stlouisfed.org/series/PPIACO" target="_blank" rel="noopener">FRED · PPIACO PPI 全部商品</a>
+        <a href="https://fred.stlouisfed.org/series/RSAFS" target="_blank" rel="noopener">FRED · RSAFS 零售与餐饮服务</a>
+        <a href="https://home.treasury.gov/resource-center/data-chart-center/interest-rates/TextView?type=daily_treasury_yield_curve&field_tdr_date_value=2026" target="_blank" rel="noopener">美国财政部 · 每日国债收益率曲线 CSV（10Y 取此）</a>
+        <a href="https://www.okx.com/api/v5/market/candles?instId=BTC-USDT&bar=1d&limit=260" target="_blank" rel="noopener">ccxt · BTC/USDT 日线（中位价与 120/200 日均线、本月/本季表现均由本地服务计算）</a>
+        <a href="/api/health" target="_blank" rel="noopener">本地取数服务 · main.py /api/health（同源中转，绕开浏览器 CORS）</a>
+        <a href="https://fred.stlouisfed.org/series/IORB/" target="_blank" rel="noopener">FRED · IORB 准备金余额利率</a>
+        <a href="https://fred.stlouisfed.org/series/RRPONTSYD" target="_blank" rel="noopener">FRED · RRPONTSYD 隔夜逆回购</a>
+        <a href="https://fred.stlouisfed.org/series/DGS10" target="_blank" rel="noopener">FRED · DGS10 10 年期美债</a>
+        <a href="https://fred.stlouisfed.org/series/UNRATE" target="_blank" rel="noopener">FRED · UNRATE 失业率</a>
+        <a href="https://www.federalreserve.gov/releases/h41/" target="_blank" rel="noopener">美联储 H.4.1 资产负债表周报</a>
+        <a href="https://www.newyorkfed.org/markets/reference-rates/sofr" target="_blank" rel="noopener">纽约联储 · SOFR 参考利率</a>
+        <a href="https://www.newyorkfed.org/newsevents/speeches/2026/per260519" target="_blank" rel="noopener">纽约联储 · 准备金管理与 SOMA</a>
+        <a href="https://www.cnbc.com/2026-09-16/fed-rate-decision-september-2026.html" target="_blank" rel="noopener">CNBC · 9 月 FOMC 加息至 3.75–4%</a>
+        <a href="https://www.cnbc.com/2026-09-16/yardeni-trims-sp-500-target-says-proceed-with-caution-as-rates-rise.html" target="_blank" rel="noopener">CNBC · Yardeni 下调标普目标价</a>
+        <a href="https://www.bondsavvy.com/fixed-income-investments-blog/fed-dot-plot" target="_blank" rel="noopener">BondSavvy · 9 月点阵图指向低 4%</a>
+        <a href="http://www.cnfin.com/kx/detail/20260911/4468950_1.html" target="_blank" rel="noopener">证券时报 · 8 月核心 CPI 2.4% / 0.3%</a>
+        <a href="https://m.toutiao.com/article/7684025957086249508/" target="_blank" rel="noopener">8 月 PPI 同比 5.4% 环比创三月新高</a>
+        <a href="https://m.10jqka.com.cn/20260910/c679796767.html" target="_blank" rel="noopener">8 月核心 PPI 同比 4.6%</a>
+        <a href="https://m.10jqka.com.cn/20260916/c679984768.html" target="_blank" rel="noopener">8 月零售销售环比 +1.2%</a>
+        <a href="https://m.10jqka.com.cn/20260916/c679946746.html" target="_blank" rel="noopener">9/15 隔夜逆回购使用规模 7 亿美元</a>
+        <a href="https://m.163.com/dy/article/L79DTD1G05568W0A.html" target="_blank" rel="noopener">媒体稿 · BTC 9 月抗跌 / Q3 +32% / 约 $78,000（此转述值已被 ccxt 实算取代，保留作纠错依据）</a>
+        <a href="https://m.toutiao.com/article/7681292744161886739/" target="_blank" rel="noopener">投资需求疲软，BTC 难站稳 $80,000</a>
+        <a href="https://www.zhitongcaijing.com/content/detail/1479816.html" target="_blank" rel="noopener">BTC 买盘枯竭，200 周均线支撑危矣</a>
+        <a href="https://fortune.com/article/price-of-bitcoin-09-02-2026/" target="_blank" rel="noopener">Fortune · 9/2 比特币报价 $76,672</a>
+      </div>
+    </div>
+
+    <!-- 修订说明：data-show 的标记由本地服务按 config.ini [page] show_fix 替换，0 时不渲染；
+         show_fix=1 时标题可点击展开/收缩（折叠状态记在 localStorage，刷新后保持） -->
+    <div id="revs" data-show="{{SHOW_FIX}}">
+    <div class="panel revhead">
+      <h3><button id="revbtn" class="revbtn" type="button" aria-expanded="true" aria-controls="revbody">
+        <span class="car">▾</span>修订记录
+        <span class="num" style="margin-left:auto;color:var(--tx3);font-weight:400">v2 → v5 · 点击展开／收缩 · 数据出错与架构变更一律留痕，不静默改写</span>
+      </button></h3>
+    </div>
+    <div id="revbody" data-open="1">
+    <div class="rev">
+      <b>修订 v2 · 2026-09-21</b>
+      用户指出 BTC 报价错误（页面 $78,000 / 实际 $81,400+）。根因：当时行情接口经检索代理全部取数失败，我降级使用了 <b>9/20 的新闻报价</b>，却没有在卡片上标注这是滞后两天的二手数据。
+      更正后连带影响：① 「反弹受阻、需求端失血」结论<b>作废</b>——实际是站上 81,300 前高、与 10Y 破 5% 同时发生的<b>逆势新高</b>；② 顺手取到财政部 9/18 官方收盘，10Y 实为 <b>5.01%</b>（非 4.94%），<b>长端链条被强化</b>。
+      综合评级维持 🔴 高危，但依据从「三链共振」修正为「<b>两链成立、一链分歧</b>」。BTC 与 10Y 已改为浏览器端实时取数。
+    </div>
+
+    <div class="rev">
+      <b>修订 v3 · 2026-09-21</b>
+      用户提供本地代理（HTTP／HTTPS／SOCKS5 同端口）后，<b>全部 11 项指标改为刷新即取</b>：新增 <span class="num">fetch_server.py</span> 作同源中转层，服务端经代理取 FRED（WALCL／WDTGAL／RRPONTSYD／SOFR／IORB／UNRATE／CPILFESL／PCEPILFE／WPSFD49201／PPIACO／RSAFS）、美国财政部收益率曲线，BTC 现价与日线由 <span class="num">ccxt</span> 逐家交易所取并计中位数，页面从 <span class="num">/api/*</span> 水合。
+      <b>连带结果：</b>① 看板数值、变化幅度、<b>风险评级与 5/3/3 构成</b>不再手写，改由代码阈值实时判级；② BTC 的 120／200 日均线首次算出实测值；③ 净流动性、利差、萨姆规则缺口全部改为前端现算，公式随页展示。取数失败时回落到 9/21 快照并在卡片上标注「○ 快照」。
+    </div>
+
+    <div class="rev">
+      <b>修订 v4 · 2026-09-21</b>
+      取数层加<b>接口日志</b>：每次刷新、每笔上游请求、每家交易所报价写入 <span class="num">logs/fetch_server.log</span>（每日轮转留 14 天），卡片显示「● 实时」还是「○ 快照」从此有日志可查，不再靠印象。
+      日志随即暴露两处缺陷并已修复：① 预热与首屏 <span class="num">force=1</span> 撞在一起，同一批上游被<b>重复请求两次</b>，现改为同键并发只放一个去上游、其余复用结果；② FRED 与行情源<b>共用一把串行锁</b>，导致冷启动时 13 个序列整体排在 ccxt 预热（实测 40~60 秒）之后、<b>首屏 5 张卡片退回快照</b>，现拆成 <span class="num">gov_lock</span>／<span class="num">mkt_lock</span> 两条队列，冷启动 11 秒内即 <b>11/11 ● 实时</b>。启动器改名 <span class="num">start_app.bat</span>，Windows 10 步骤与故障排查写入 <span class="num">README.md</span>。
+    </div>
+
+    <div class="rev">
+      <b>修订 v5 · 2026-09-21</b>
+      运行参数从 <span class="num">main.py</span> 的 <span class="num">setdefault</span> 抽到 <span class="num">config.ini</span>（优先级 环境变量 &gt; 文件 &gt; 代码默认），并加 <span class="num">[page] show_fix</span> 开关：<b>1 展示／0 隐藏本「修订记录」整块</b>。生效方式是本地服务返回 HTML 时替换 <span class="num">&#123;&#123;SHOW_FIX&#125;&#125;</span> 标记，因此<b>只对 http://127.0.0.1:4319/… 生效</b>，双击打开文件时标记未替换、按展示处理；隐藏只是不渲染，历史记录仍留在文件里，不删除也不改写。<b>展示时点击标题可展开／收缩</b>，折叠状态记在本机 <span class="num">localStorage</span>，刷新后保持。
+    </div>
+
+    <div class="rev">
+      <b>修订 v6 · 2026-09-22</b>
+      本项目并入 <span class="num">DigitalAssetsMetricsBoard</span> 看板：三个子页面（宏观流动性／美股崩盘监测／全球优质资产配置）与主页共用<b>单一本地服务</b>（根目录 <span class="num">main.py</span> + <span class="num">api/core.py</span> 公共层），接口前缀改为 <span class="num">/api/liquidity/*</span>，响应契约不变；页面公共方法（取数、格式化、SVG 基元、实时/快照徽标、导航）提取到 <span class="num">staic/common.js / common.css</span>。旧版独立取数服务 <span class="num">fetch_server.py</span> 移入 <span class="num">api/Liquidity/_legacy/</span> 归档，不再双实现并存。
+    </div>
+
+    <div class="rev">
+      <b>修订 v7 · 2026-09-22</b>
+      监听端口 <span class="num">4319 → 8888</span>，只改 <span class="num">config.ini</span> 的 <span class="num">[server] port</span> 一处（代码与 <span class="num">start_app.bat</span> 都不写死端口，页面上的地址由脚本按 <span class="num">location.origin</span> 现取）。<b>页面与 /api 同源、共用这一个端口，不存在第二个「前端端口」</b>：浏览器经 <span class="num">15888</span> 访问是本机之外的反向代理／端口映射在转发（15888 → 127.0.0.1:8888），本项目不参与，也不因它解除 <span class="num">127.0.0.1</span> 绑定。同日新增 serv00 / Passenger WSGI 只读公网镜像（根 <span class="num">passenger_wsgi.py</span>，<span class="num">PUBLIC=1</span> 下不注册持仓报告路由、静态只放前端文件），见 <span class="num">README</span> 第 7.2 节。上面 v5 那条里的 <span class="num">4319</span> 是当时事实，按纪律保留不改写。
+    </div>
+    </div>
+    </div>
+    <script>
+    /* 折叠状态在首屏绘制前恢复，否则每次刷新会先闪出整段历史再收起；localStorage 不可用时按展开处理 */
+    (function () {
+      const body = document.getElementById('revbody'), btn = document.getElementById('revbtn');
+      const set = (open) => { body.dataset.open = open ? '1' : '0'; btn.setAttribute('aria-expanded', String(open)); };
+      let saved = null;
+      try { saved = localStorage.getItem('rev-open'); } catch (e) { }
+      set(saved !== '0');
+      btn.addEventListener('click', () => {
+        const open = body.dataset.open !== '1';
+        set(open);
+        try { localStorage.setItem('rev-open', open ? '1' : '0'); } catch (e) { }
+      });
+    })();
+    </script>
+  </section>
+
+</div>
+
+<footer>
+  <p>本报告为基于公开官方数据的宏观流动性风险审计，非个性化投资建议。仓位决策请结合自身杠杆约束与止损纪律执行。</p>
+  <p style="margin-top:8px">数据获取方式：<b>11 项指标全部由页面刷新时经本地服务 <span class="num">fetch_server.py</span> 取回</b>（服务端走 HTTP/HTTPS/SOCKS5 代理，绕开浏览器 CORS 限制）。直接双击 HTML 打开或代理未开启时，页面自动退回 <span class="num">2026-09-21</span> 的一手取证快照，并在每张卡片上以「○ 快照」标注。每次取数的实际耗时、来源与退回旧值的记录见 <span class="num">logs/fetch_server.log</span>。启动方式见 <span class="num">start_app.bat</span>。</p>
+</footer>
+
+<script src="common.js"></script>
+<script>
+/* =====================================================================
+   取数链路：页面 → 本地服务 /api/liquidity/* → (代理，见 config.ini) → 官方源
+   浏览器无法自行走代理，且 FRED/纽约联储不返回 CORS 头，
+   所以全部 11 项指标必须经本地服务中转。公共方法在 staic/common.js。
+   任何一项取数失败：回落到上次成功值或内置快照，并明确标注时龄。
+   ===================================================================== */
+const KEYS = ['walcl','tga','rrp','sofr','iorb','unrate','ppi','ppifd','cpi','pce','rsafs'];
+const RAW = {};          // key -> {rows:[{d,v}], ok, error, source, cached_at}
+let BTC = null, TRE = null;
+let FETCHED = 0, TICK = 0;
+const AGE = {};          // key -> 官方观测截止日
+
+/* 兜底快照：仅收录本次审计中一手核验过的官方读数（/api 不可达时使用，卡片会标注「○ 快照」）。
+   未核验的数值一律不填，宁可显示「—」也不推测。 */
+const FB = {
+  walcl: [['2026-08-19',6745699],['2026-08-26',6730912],['2026-09-02',6737204],['2026-09-09',6740619],['2026-09-16',6746548]],
+  tga:   [['2026-08-19',936406],['2026-08-26',959435],['2026-09-02',944364],['2026-09-09',843705],['2026-09-16',991708]],
+  rrp:   [['2026-09-10',4.736],['2026-09-11',5.255],['2026-09-14',1.42],['2026-09-15',0.7],['2026-09-16',5.375],['2026-09-17',0.276],['2026-09-18',0.576]],
+  sofr:  [['2026-09-08',3.64],['2026-09-09',3.64],['2026-09-10',3.62],['2026-09-11',3.62],['2026-09-14',3.62],['2026-09-15',3.64],['2026-09-16',3.62],['2026-09-17',3.85]],
+  iorb:  [['2026-09-16',3.65],['2026-09-17',3.90],['2026-09-18',3.90],['2026-09-21',3.90]],
+  y10:   [['09/08/2026',4.80],['09/09/2026',4.83],['09/10/2026',4.95],['09/11/2026',4.96],['09/14/2026',4.97],['09/15/2026',5.00],['09/16/2026',5.01],['09/17/2026',4.94],['09/18/2026',5.01]],
+  unrate:[['2026-05-01',4.3],['2026-06-01',4.2],['2026-07-01',4.1],['2026-08-01',4.1]],
+  cpi:   [['2026-05-01',336.121],['2026-06-01',336.065],['2026-07-01',336.789],['2026-08-01',337.765]],
+  ppi:   [['2025-07-01',262.358],['2025-08-01',262.11],['2026-06-01',286.023],['2026-07-01',285.181],['2026-08-01',287.928]],
+  ppifd: [['2026-07-01',154.775],['2026-08-01',155.243]],
+  pce:   [['2026-02-01',128.961],['2026-03-01',129.343],['2026-04-01',129.681],['2026-05-01',130.147],['2026-06-01',130.338],['2026-07-01',130.658]],
+  rsafs: [['2026-05-01',766192],['2026-06-01',768587],['2026-07-01',764462],['2026-08-01',773947]],
+  btc:   { spot: 81400, ma120: null, ma200: null, closes: [] },
+};
+function fbRows(k) { const v = FB[k]; return Array.isArray(v) ? v.map(r => ({ d: r[0], v: r[1] })) : []; }
+/* 取数结果；失败时用兜底快照并记为 stale */
+function rows(k) {
+  const r = RAW[k];
+  if (r && r.ok && r.rows && r.rows.length) return { v: r.rows, live: true, src: r.source };
+  return { v: fbRows(k), live: false, src: '内置快照 2026-09-21' };
+}
+
+/* ===== 派生指标：所有测算在前端完成，公式可见 ===== */
+function derive() {
+  const w = rows('walcl'), t = rows('tga'), r = rows('rrp');
+  const rmap = new Map(r.v.map(x => [x.d, x.v]));
+  const tmap = new Map(t.v.map(x => [x.d, x.v]));
+  const weeks = [];
+  for (const x of w.v) {                                  // 以 WALCL 的周三为对齐锚
+    const rr = rmap.get(x.d) ?? nearest(r.v, x.d);
+    const tt = tmap.get(x.d);
+    if (tt == null || rr == null) continue;
+    weeks.push({ d: x.d, walcl: x.v / 1000, tga: tt / 1000, rrp: rr, net: x.v / 1000 - tt / 1000 - rr });
+  }
+  const wk = weeks.slice(-6);
+  const cur = wk.at(-1), prv = wk.at(-2) || cur;
+
+  const sf = rows('sofr'), io = rows('iorb');
+  const iomap = new Map(io.v.map(x => [x.d, x.v]));
+  const days = sf.v.slice(-8).map(x => {
+    const i = iomap.get(x.d) ?? nearest(io.v, x.d);
+    return { d: x.d, sofr: x.v, iorb: i, spread: i == null ? null : x.v - i };
+  });
+  const dcur = days.at(-1) || { d: '', sofr: null, iorb: null, spread: null };
+
+  const tre = TRE && TRE.ok ? TRE.rows.map(x => ({ d: x.d, v: x.y10 })).reverse() : fbRows('y10').map(x => ({ d: x.d, v: x.v }));
+  const y10 = tre.slice(-9);
+  if (!wk.length || !y10.length) return null;
+  const ycur = y10.at(-1), yprv = y10.at(-2) || ycur;
+
+  const b = BTC && BTC.ok ? BTC : { ...FB.btc, n: 0 };
+  const momYoy = (k, dp = 2) => {
+    const a = rows(k).v.filter(x => x.v > 0);
+    if (!a.length) return { d: '', v: null, mom: null, yoy: null, dp, live: false };
+    const v = a.map(x => x.v);
+    const ld = last(a.map(x => x.d)), want = (Number(ld.slice(0, 4)) - 1) + ld.slice(4);
+    const byDate = a.find(x => x.d === want);
+    const curv = last(v), prev = v.at(-2), yr = byDate ? byDate.v : (v.length > 12 ? v[v.length - 13] : null);
+    return { d: ld, v: curv, mom: prev ? (curv / prev - 1) * 100 : null, yoy: yr ? (curv / yr - 1) * 100 : null, dp, live: rows(k).live };
+  };
+  const unAll = rows('unrate').v;
+  const un = unAll.filter(x => x.v > 0);            // 2025-10 官方值为 0（BLS 停摆未发布），按缺测剔除
+  const dropped = unAll.filter(x => !(x.v > 0)).map(x => x.d);
+  const uv = un.map(x => x.v);
+  const r3 = uv.slice(-3).reduce((a, b2) => a + b2, 0) / Math.min(3, uv.length);
+  const lo13 = Math.min(...uv.slice(-13));
+  const sam = { v: last(uv), d: last(un.map(x => x.d)), r3, lo: lo13, gap: r3 - lo13, hit: r3 - lo13 >= 0.5, live: rows('unrate').live };
+  return { wk, cur, prv, days, dcur, y10, ycur, yprv, b, core: momYoy('cpi'), ppi: momYoy('ppifd'), pce: momYoy('pce'), ppiAll: momYoy('ppi'), ret: momYoy('rsafs'), un, sam, dropped };
+}
+
+/* ===== 看板：数值、变化、结论与评级全部由实时数据生成 ===== */
+function build(M) {
+  const wchg = M.cur.walcl - M.prv.walcl;
+  const tchg = M.cur.tga - M.prv.tga;
+  const nchg = M.cur.net - M.prv.net;
+  const i0 = M.days.find(x => x.iorb != null), i1 = last(M.days.filter(x => x.iorb != null));
+  const ichg = i0 && i1 ? i1.iorb - i0.iorb : null;
+  const schg = M.dcur.sofr != null && M.days.at(-2) && M.days.at(-2).sofr != null ? M.dcur.sofr - M.days.at(-2).sofr : null;
+  const sprd = M.dcur.spread;
+  const vs120 = M.b.ma120 ? (M.b.spot / M.b.ma120 - 1) * 100 : null;
+  const vs200 = M.b.ma200 ? (M.b.spot / M.b.ma200 - 1) * 100 : null;
+  const trend = a => Math.min(...a) + '–' + Math.max(...a);
+  const walclRisk = wchg >= -5 ? 'lo' : 'md';
+  const out = [
+    { k: 'walcl', n: '美联储总资产', s: 'WALCL · 周三', v: M.cur.walcl / 1000, dp: 4, u: '万亿$',
+      d: `周变化 ${pc(wchg / M.prv.walcl * 100)}（${nfd(wchg)}B）· 近 ${M.wk.length} 周区间 ${trend(M.wk.map(x => (x.walcl / 1000).toFixed(3)))}`,
+      r: walclRisk, sp: M.wk.map(x => x.walcl) },
+    { k: 'tga', n: 'TGA 余额', s: 'WDTGAL · 周三水位', v: M.cur.tga, dp: 1, u: '十亿$',
+      d: `<b>周变化 ${nfd(tchg)}B</b>（${nfd(M.prv.tga)} → ${nfd(M.cur.tga)}）· 距 $850B 阈值 ${nfd(M.cur.tga - 850)}B`,
+      r: tchg > 80 ? 'hi' : tchg > 30 ? 'md' : 'lo', sp: M.wk.map(x => x.tga) },
+    { k: 'rrp', n: 'ON RRP 余额', s: 'RRPONTSYD · 最新日读数', v: last(rows('rrp').v).v, dp: 3, u: '十亿$',
+      d: `近 7 日 ${rows('rrp').v.slice(-7).map(x => md(x.d) + ' ' + nfd(x.v, 1)).join(' · ')} · 净流动性测算用与 WALCL 同周三的 ${md(M.cur.d)} 值 ${nfd(M.cur.rrp, 3)}B · 峰值 $2.5T 已耗尽，<b>缓冲垫消失</b>`,
+      r: last(rows('rrp').v).v < 20 ? 'hi' : last(rows('rrp').v).v < 200 ? 'md' : 'lo', sp: rows('rrp').v.slice(-14).map(x => x.v) },
+    { k: 'sofr', n: 'SOFR', s: '隔夜担保融资利率', v: M.dcur.sofr, dp: 2, u: '%',
+      d: `较前一日 ${bp(schg)} · 与 IORB 利差 <b>${sprd == null ? '—' : (sprd * 100).toFixed(0) + 'bp'}</b>`,
+      r: sprd == null ? 'md' : sprd > 0.10 ? 'hi' : sprd > 0 ? 'md' : 'lo', sp: M.days.map(x => x.sofr) },
+    { k: 'iorb', n: 'IORB', s: '准备金余额利率', v: M.dcur.iorb, dp: 2, u: '%',
+      d: `区间 ${nfd(i0 && i0.iorb, 2)}% → ${nfd(i1 && i1.iorb, 2)}%（${bp(ichg)}）· ${ichg > 0 ? '<b>政策方向为加息</b>' : ichg < 0 ? '<b>政策方向为降息</b>' : '政策利率未变'}`,
+      r: ichg > 0 ? 'hi' : ichg < 0 ? 'lo' : 'md', sp: M.days.map(x => x.iorb) },
+    { k: 'y10', n: 'US10Y', s: '财政部官方曲线', v: M.ycur.v, dp: 2, u: '%',
+      d: `上一交易日 ${nfd(M.yprv.v, 2)}% → <b>${nfd(M.ycur.v, 2)}%</b>（${bp(M.ycur.v - M.yprv.v)}）· ${M.ycur.v >= 5 ? '<b>5% 关口之上收盘</b>' : '暂失 5%'}`,
+      r: M.ycur.v >= 5 ? 'hi' : M.ycur.v >= 4.8 ? 'md' : 'lo', sp: M.y10.map(x => x.v) },
+    { k: 'btc', n: 'BTCUSD', s: 'ccxt 多所中位现货', v: Math.round(M.b.spot), dp: 0, u: '$',
+      d: `MA120 ${nfd(M.b.ma120, 0)}（${pc(vs120, 1)}）· MA200 ${nfd(M.b.ma200, 0)}（${pc(vs200, 1)}）· ${M.b.n || 0} 源中位` +
+         (M.b.perf_m == null ? '' : ` · 本月 ${pc(M.b.perf_m, 1)} / 本季 ${pc(M.b.perf_q, 1)}`),
+      r: vs200 == null ? 'md' : vs200 > 0 && vs120 > 0 ? 'lo' : vs200 < 0 ? 'hi' : 'md', sp: M.b.closes || [] },
+    { k: 'cpi', n: '核心 CPI', s: 'CPILFESL · 同比', v: M.core.yoy, dp: 2, u: '%',
+      d: `环比 <b>${pc(M.core.mom)}</b> · 指数 ${nfd(M.core.v, 2)}（${md(M.core.d)} 月值）`,
+      r: M.core.yoy == null ? 'md' : M.core.yoy > 3 ? 'hi' : M.core.yoy > 2.5 ? 'md' : 'lo', sp: rows('cpi').v.slice(-13).map(x => x.v) },
+    { k: 'ppifd', n: 'PPI 终端需求', s: 'WPSFD49201 · 同比', v: M.ppi.yoy, dp: 2, u: '%',
+      d: `环比 <b>${pc(M.ppi.mom)}</b> · 全部商品 PPI 同比 ${pc(M.ppiAll.yoy, 1)}（PPIACO，生产端更上游）`,
+      r: M.ppi.yoy == null ? 'md' : M.ppi.yoy > 3 ? 'hi' : M.ppi.yoy > 2 ? 'md' : 'lo', sp: rows('ppifd').v.slice(-13).map(x => x.v) },
+    { k: 'unrate', n: '失业率', s: 'UNRATE · 萨姆规则', v: M.sam.v, dp: 1, u: '%',
+      d: `3 月均值 ${nfd(M.sam.r3, 2)} − 13 月低点 ${nfd(M.sam.lo, 1)} = <b>${nfd(M.sam.gap, 2)}pp</b> → 萨姆${M.sam.hit ? '<b style="color:var(--red)">已触发</b>' : '未触发（阈值 0.50pp）'}${M.dropped.length ? ' · 已剔除 ' + M.dropped.map(md).join('/') + ' 缺测（官方 0 值）' : ''}`,
+      r: !Number.isFinite(M.sam.gap) ? 'md' : M.sam.hit ? 'hi' : M.sam.gap >= 0.3 ? 'md' : 'lo', sp: M.un.slice(-13).map(x => x.v) },
+    { k: 'rsafs', n: '零售销售', s: 'RSAFS · 环比', v: M.ret.mom, dp: 2, u: '%',
+      d: `${md(M.ret.d)} 月 ${nfd(M.ret.v / 1000, 0)} 十亿$ · 需求韧性${M.ret.mom > 0.6 ? '<b>＝支撑继续紧缩</b>' : ''}`,
+      r: M.ret.mom == null ? 'md' : M.ret.mom < 0 ? 'hi' : M.ret.mom < 0.6 ? 'md' : 'lo', sp: rows('rsafs').v.slice(-13).map(x => x.v / 1000) },
+  ];
+  return { out, wchg, tchg, nchg, sprd, ichg, vs120, vs200, M };
+}
+
+/* ===== SVG 基元：path/spark/hex/domOf/ticksOf 已提取至 staic/common.js ===== */
+
+/* ===== 渲染：看板 ===== */
+let CUR = [], IND = [], LIVE_OK = false;
+function badge(d) {
+  const raw = AGE[d.k] || '', a = ago(raw);
+  const n = /^\d{2}:/.test(raw) ? ' · 行情 ' + raw
+    : a === '' || a == null ? '' : ' · 官方截至 ' + (raw.length > 10 ? md(raw) : us(raw)) + '（' + a + ' 天前）';
+  return d.live
+    ? `<div class="cadb live">● 实时 ${d.src || ''}${n}</div>`
+    : `<div class="cadb">○ 快照 ${d.src || ''}${n}</div>`;
+}
+function paint() {
+  const g = $('grid'); if (!g) return;
+  g.innerHTML = CUR.map(d => {
+    const [cl, lbl] = RISK[d.r] || RISK.md, col = d.r === 'hi' ? '#f2555a' : d.r === 'md' ? '#e8a33d' : '#4ade80';
+    return `<article class="card">
+      <span class="risk ${cl}">${lbl}</span>
+      <div class="nm">${d.n} <small>${d.s}</small></div>
+      <div class="val num">${d.v == null ? '—' : nfd(d.v, d.dp)}<u>${d.u}</u></div>
+      ${badge(d)}
+      <div class="dt">${d.d}</div>
+      ${spark(d.sp, col)}
+    </article>`;
+  }).join('');
+}
+function applyF() { CUR = (window.__f || 'all') === 'all' ? IND : IND.filter(d => d.r === window.__f); paint(); }
+function renderFilters() {
+  const c = { hi: 0, md: 0, lo: 0 }; IND.forEach(d => c[d.r]++);
+  const fw = $('filters'); if (!fw) return;
+  fw.innerHTML = '<em>风险筛选</em>' + [['all', '全部 ' + IND.length], ['hi', '🔴 高危 ' + c.hi], ['md', '🟡 中性 ' + c.md], ['lo', '🟢 安全 ' + c.lo]]
+    .map((f, i) => `<button class="chipf${i ? '' : ' on'}" data-k="${f[0]}">${f[1]}</button>`).join('');
+  return c;
+}
+$('filters').onclick = e => {
+  const b = e.target.closest('.chipf'); if (!b) return;
+  $('filters').querySelectorAll('.chipf').forEach(x => x.classList.toggle('on', x === b));
+  window.__f = b.dataset.k; applyF();
+};
+
+/* ===== 渲染：净流动性（柱＋折线）与瀑布 ===== */
+function renderNet(M, nchg) {
+  const el = $('netChart'); if (!el) return;
+  const w = 680, h = 250, p = 40, v = M.wk.map(x => x.net);
+  const [mn, mx] = domOf(v, .18);
+  const Y = x => h - p - (x - mn) / (mx - mn) * (h - p * 2);
+  const slot = (w - p * 2) / M.wk.length, bw = slot * .5;
+  let g = '';
+  ticksOf(mn, mx, 3).forEach(t => { g += `<line x1="${p}" x2="${w - p}" y1="${Y(t).toFixed(1)}" y2="${Y(t).toFixed(1)}" stroke="${T('--grid')}" stroke-dasharray="3 4"/><text x="${p - 5}" y="${(Y(t) + 3.5).toFixed(1)}" fill="${T('--tick')}" font-size="9" text-anchor="end" font-family="monospace">${t.toFixed(0)}</text>`; });
+  let bars = '';
+  M.wk.forEach((x, i) => {
+    const cx = p + slot * (i + .5), hi = i === M.wk.length - 1;
+    bars += `<rect x="${(cx - bw / 2).toFixed(1)}" y="${Y(x.net).toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(h - p - Y(x.net), 1).toFixed(1)}" fill="${hi ? hex('#f2555a', .5) : hex(T('--gold'), .16)}" stroke="${hi ? '#f2555a' : T('--gold')}" stroke-opacity=".55" stroke-width="1" rx="2"/>
+      <text x="${cx.toFixed(1)}" y="${h - 11}" fill="${hi ? T('--lbl') : T('--tick')}" font-size="10" text-anchor="middle" font-family="monospace">${md(x.d)}</text>`;
+  });
+  const lnx = M.wk.map((x, i) => [p + slot * (i + .5), Y(x.net)]);
+  const ln = lnx.map((q, i) => `${i ? 'L' : 'M'}${q[0].toFixed(1)},${q[1].toFixed(1)}`).join(' ');
+  const mnv = Math.min(...v), pts = lnx.map((q, i) => {
+    const hi = M.wk[i].net <= mnv;
+    return `<circle cx="${q[0].toFixed(1)}" cy="${q[1].toFixed(1)}" r="${hi ? 3.6 : 2.4}" fill="${hi ? '#f2555a' : T('--bg')}" stroke="${hi ? '#f2555a' : T('--gold')}" stroke-width="1.6"/>` +
+      (i === lnx.length - 1 ? `<text x="${(q[0] - 6).toFixed(1)}" y="${(q[1] - 11).toFixed(1)}" fill="${hi ? '#f2555a' : T('--gold')}" font-size="11" text-anchor="end" font-family="monospace" font-weight="700">${nfd(M.wk[i].net)} ${hi ? '← 区间最低' : '← 最新'}</text>` : '');
+  }).join('');
+  el.innerHTML = `<svg class="chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="净流动性周度轨迹，最新 ${nfd(M.cur.net)} 十亿美元，单周变化 ${nfd(nchg)} 十亿">${g}${bars}<path d="${ln}" fill="none" stroke="${T('--gold')}" stroke-width="2"/>${pts}</svg>`;
+
+  const f = $('netFormula');
+  if (f) {
+    const l = M.wk.at(-1), q = M.wk.at(-2) || l;
+    f.innerHTML = `<b>${md(l.d)}</b>&nbsp; ${nfd(l.walcl)} &nbsp;−&nbsp; ${nfd(l.tga)} &nbsp;−&nbsp; ${nfd(l.rrp, 2)} &nbsp;=&nbsp; <b>${nfd(l.net)}</b><br>
+      <b>${md(q.d)}</b>&nbsp; ${nfd(q.walcl)} &nbsp;−&nbsp; ${nfd(q.tga)} &nbsp;−&nbsp; ${nfd(q.rrp, 2)} &nbsp;=&nbsp; <b>${nfd(q.net)}</b><br>
+      <span style="color:${T('--tick')}">─────────────────────────────────────</span><br>
+      单周净流动性变化&nbsp; <b style="color:${nchg < 0 ? 'var(--red)' : 'var(--green)'}">${nfd(nchg)}B（${pc(nchg / q.net * 100, 1)}）</b>`;
+  }
+  const wf = $('waterfall');
+  if (wf) {
+    const c = M.cur, steps = [{ l: 'WALCL', v: c.walcl, cn: T('--gold'), t: '起点' }, { l: '− TGA', v: -c.tga, cn: '#4a6f8a', t: '财政蓄水' }, { l: '− RRP', v: -c.rrp, cn: T('--tick'), t: c.rrp < 20 ? '≈ 归零' : '缓冲垫' }, { l: '= 净流动性', v: c.net, cn: '#f2555a', t: '最新读数' }];
+    const run = [c.walcl, c.walcl - c.tga, c.walcl - c.tga - c.rrp, c.net];
+    const ww = 420, wh = 168, wp = 8, sl = (ww - wp * 2) / steps.length;
+    const [dmn, dmx] = domOf([c.walcl, c.net], .12);
+    const W = v2 => wh - 26 - (v2 - dmn) / (dmx - dmn) * (wh - 52);
+    let blocks = '';
+    steps.forEach((b2, i) => {
+      const x = wp + i * sl, bw2 = sl * .56;
+      const y0 = (i === 0 || i === 3) ? W(b2.v) : W(run[i - 1]), y1 = (i === 0 || i === 3) ? wh - 26 : W(run[i]);
+      const top = Math.min(y0, y1), ht = Math.max(Math.abs(y1 - y0), 2);
+      blocks += `<rect x="${(x + (sl - bw2) / 2).toFixed(1)}" y="${top.toFixed(1)}" width="${bw2.toFixed(1)}" height="${ht.toFixed(1)}" fill="${hex(b2.cn, i === 3 ? .42 : .22)}" stroke="${b2.cn}" stroke-opacity=".7" stroke-width="1" rx="2"/>
+        <text x="${(x + sl / 2).toFixed(1)}" y="${wh - 9}" fill="${T('--tx2')}" font-size="9.5" text-anchor="middle" font-family="monospace">${b2.l}</text>
+        <text x="${(x + sl / 2).toFixed(1)}" y="${(top - 5).toFixed(1)}" fill="${b2.cn}" font-size="10" text-anchor="middle" font-family="monospace" font-weight="700">${Math.abs(b2.v).toLocaleString('en-US', { maximumFractionDigits: 1 })}</text>`;
+      if (i < 3) blocks += `<line x1="${(x + sl / 2 + bw2 / 2).toFixed(1)}" x2="${(x + sl * 1.5 - bw2 / 2).toFixed(1)}" y1="${W(run[i]).toFixed(1)}" y2="${W(run[i]).toFixed(1)}" stroke="${T('--line2')}" stroke-dasharray="2 3"/>`;
+    });
+    wf.innerHTML = `<svg class="chart" viewBox="0 0 ${ww} ${wh}" role="img" aria-label="净流动性瀑布：总资产 ${nfd(c.walcl)} 减 TGA ${nfd(c.tga)} 减 RRP ${nfd(c.rrp, 2)} 等于 ${nfd(c.net)} 十亿美元">${blocks}</svg>`;
+  }
+}
+
+/* ===== 渲染：SOFR / IORB 阶梯图 ===== */
+function renderRates(M) {
+  const el = $('rateChart'); if (!el) return;
+  const w = 680, h = 228, p = 36;
+  const [mn, mx] = domOf([...M.days.map(x => x.sofr), ...M.days.map(x => x.iorb)], .16);
+  const Y = v => h - p - (v - mn) / (mx - mn) * (h - p * 2);
+  const st = (w - p * 2) / (M.days.length - 1), X = i => p + st * i;
+  let g = '';
+  ticksOf(mn, mx, 4).forEach(t => { g += `<line x1="${p}" x2="${w - p}" y1="${Y(t).toFixed(1)}" y2="${Y(t).toFixed(1)}" stroke="${T('--grid')}" stroke-dasharray="3 4"/><text x="${p - 5}" y="${(Y(t) + 3.5).toFixed(1)}" fill="${T('--tick')}" font-size="9" text-anchor="end" font-family="monospace">${t.toFixed(2)}</text>`; });
+  const ioPts = M.days.map((x, i) => x.iorb == null ? null : [X(i), Y(x.iorb)]).filter(Boolean);
+  const io = ioPts.map((q, i) => `${i ? 'L' : 'M'}${q[0].toFixed(1)},${q[1].toFixed(1)}`).join(' ');
+  const area = svgPath(M.days.map(x => x.sofr), w, h, p, [mn, mx]) + ` L${X(M.days.length - 1).toFixed(1)},${h - p} L${p},${h - p} Z`;
+  const lbl = M.days.map((x, i) => `<text x="${X(i).toFixed(1)}" y="${h - 11}" fill="${i === M.days.length - 1 ? T('--lbl') : T('--tick')}" font-size="9.5" text-anchor="middle" font-family="monospace">${md(x.d)}</text>`).join('');
+  const iors = M.days.filter(x => x.iorb != null);
+  if (!iors.length || !M.days.length) return;
+  const sof = last(M.days), ioL = last(iors);
+  const jump = iors.length > 1 && ioL.iorb !== iors[0].iorb ? `<line x1="${X(M.days.length - 1)}" x2="${X(M.days.length - 1)}" y1="${p - 6}" y2="${h - p}" stroke="#f2555a" stroke-width="1" stroke-dasharray="3 3"/><text x="${X(M.days.length - 1) - 6}" y="${p + 2}" fill="#f2555a" font-size="9.5" text-anchor="end" font-family="monospace">IORB ${bp(ioL.iorb - iors[0].iorb)}</text>` : '';
+  el.innerHTML = `<svg class="chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="SOFR ${sof.sofr}% 与 IORB ${ioL.iorb}%，利差 ${((sof.sofr - ioL.iorb) * 100).toFixed(0)} 个基点">
+    ${g}${jump}
+    <path d="${area}" fill="${hex('#6db3d4', .09)}"/>
+    <path d="${io}" fill="none" stroke="${T('--gold')}" stroke-width="2"/>
+    <path d="${svgPath(M.days.map(x => x.sofr), w, h, p, [mn, mx])}" fill="none" stroke="#6db3d4" stroke-width="2"/>
+    ${M.days.map((x, i) => `<circle cx="${X(i).toFixed(1)}" cy="${Y(x.sofr).toFixed(1)}" r="2.3" fill="#6db3d4"/>`).join('')}
+    <text x="${(X(M.days.length - 1) - 8).toFixed(1)}" y="${(Y(ioL.iorb) - 7).toFixed(1)}" fill="${T('--gold')}" font-size="10.5" text-anchor="end" font-family="monospace" font-weight="700">IORB ${nfd(ioL.iorb, 2)}</text>
+    <text x="${(X(M.days.length - 1) - 8).toFixed(1)}" y="${(Y(sof.sofr) + 14).toFixed(1)}" fill="#6db3d4" font-size="10.5" text-anchor="end" font-family="monospace" font-weight="700">SOFR ${nfd(sof.sofr, 2)}</text>
+    ${lbl}</svg>`;
+}
+
+/* ===== 渲染：10Y ===== */
+function renderY10(M) {
+  const el = $('y10Chart'); if (!el) return;
+  const w = 430, h = 180, p = 30, v = M.y10.map(x => x.v), last_i = v.length - 1;
+  const [mn, mx] = domOf(v, .16);
+  const Y = x => h - p - (x - mn) / (mx - mn) * (h - p * 2);
+  const st = (w - p * 2) / last_i, X = i => p + st * i;
+  let g = '';
+  ticksOf(mn, mx, 3).forEach(t => { g += `<line x1="${p}" x2="${w - p}" y1="${Y(t).toFixed(1)}" y2="${Y(t).toFixed(1)}" stroke="${T('--grid')}" stroke-dasharray="3 4"/><text x="${p - 5}" y="${(Y(t) + 3.5).toFixed(1)}" fill="${T('--tick')}" font-size="9" text-anchor="end" font-family="monospace">${t.toFixed(2)}</text>`; });
+  const ln = v.map((x, i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)},${Y(x).toFixed(1)}`).join(' ');
+  const cur = last(v);
+  const gate = cur >= 4.9 && mn < 5 && mx > 5 ? `<line x1="${p}" x2="${w - p}" y1="${Y(5).toFixed(1)}" y2="${Y(5).toFixed(1)}" stroke="#f2555a" stroke-width="1" stroke-opacity=".5"/><text x="${p}" y="${(Y(5) - 5).toFixed(1)}" fill="#f2555a" font-size="9.5" font-family="monospace">5.00% 关口</text>` : '';
+  const lbl = M.y10.map((x, i) => i % 2 ? '' : `<text x="${X(i).toFixed(1)}" y="${h - 8}" fill="${i === last_i ? T('--lbl') : T('--tick')}" font-size="9" text-anchor="middle" font-family="monospace">${us(x.d)}</text>`).join('');
+  el.innerHTML = `<svg class="chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="10 年期美债：${us(last(M.y10).d)} 收 ${nfd(cur, 2)}%">
+    ${g}<path d="${ln} L${X(last_i).toFixed(1)},${h - p} L${p},${h - p} Z" fill="${hex('#e8a33d', .08)}"/>
+    <path d="${ln}" fill="none" stroke="#e8a33d" stroke-width="2"/>
+    ${v.map((x, i) => `<circle cx="${X(i).toFixed(1)}" cy="${Y(x).toFixed(1)}" r="${i === last_i ? 3.4 : 2.2}" fill="${i === last_i ? (x >= 5 ? '#f2555a' : '#e8a33d') : T('--bg')}" stroke="${i === last_i ? (x >= 5 ? '#f2555a' : '#e8a33d') : '#e8a33d'}" stroke-width="1.5"/>`).join('')}
+    ${gate}
+    <text x="${(X(last_i) - 3).toFixed(1)}" y="${(Y(cur) - 9).toFixed(1)}" fill="${cur >= 5 ? '#f2555a' : '#e8a33d'}" font-size="10.5" text-anchor="end" font-family="monospace" font-weight="700">${us(last(M.y10).d)} 收 ${nfd(cur, 2)}</text>
+    ${lbl}</svg>`;
+}
+
+/* ===== 渲染：评级分布 / verdict / 正文数值 ===== */
+function setTxt(id, v) { const e = $(id); if (e) e.textContent = v; }
+function setHtml(id, v) { const e = $(id); if (e) e.innerHTML = v; }
+function renderText(M, c, ext) {
+  const cnt = renderFilters() || { hi: 0, md: 0, lo: 0 };
+  const lvl = cnt.hi >= 5 ? ['🔴 高危', 'alert'] : cnt.hi >= 3 ? ['🟡 偏防御', ''] : ['🟢 安全', ''];
+  const vc = document.querySelector('.verdict .vcard');
+  if (vc) { vc.querySelector('.vbig').innerHTML = `<span class="pulse"></span>${lvl[0]}`; vc.classList.toggle('alert', lvl[1] === 'alert'); }
+  setHtml('v-sub', `<b>${cnt.hi} 项高危 / ${cnt.md} 项中性 / ${cnt.lo} 项安全</b>，全部由实时序列按卡片下方公式测算生成。领先指标（TGA、RRP、政策利率、长端）与滞后指标（管道利差、就业）读数见看板。`);
+  const rb = $('riskbar');
+  if (rb) {
+    const col = { hi: '#f2555a', md: '#e8a33d', lo: '#4ade80' };
+    const tot = IND.length || 1;
+    rb.innerHTML = ['hi', 'md', 'lo'].map(k =>
+      `<div style="display:flex;align-items:center;gap:9px;margin-bottom:8px">
+        <span style="width:46px;font-size:11.5px;color:var(--tx2)">${RM[k]}</span>
+        <div style="flex:1;height:7px;background:#0b0c0d;border-radius:4px;overflow:hidden;border:1px solid var(--line)">
+          <div style="width:${(cnt[k] || 0) / tot * 100}%;height:100%;background:${col[k]}"></div></div>
+        <span class="num" style="width:34px;text-align:right;font-size:12px;color:${col[k]};font-weight:700">${cnt[k] || 0}</span></div>`).join('')
+      + `<div class="note" style="margin-top:13px;font-size:12px">评级阈值写死在代码里：TGA 周增 &gt;80B 记红、RRP &lt;20B 记红、SOFR−IORB 转正 &gt;10bp 记红、10Y ≥5% 记红、BTC 跌破 MA200 记红、核心 CPI 同比 &gt;3% 记红、萨姆触发记红、零售环比转负记红。<b>刷新页面即按最新数据重新判级。</b></div>`;
+  }
+  /* ② 净流动性标题与背离判定 */
+  setHtml('net-tag', `环比 ${nfd(ext.nchg)}B`);
+  setHtml('net-verdict', M.cur.net <= Math.min(...M.wk.map(x => x.net)) + 1e-9
+    ? `最新读数为<b style="color:var(--red)">区间最低</b>（${md(M.cur.d)}，${nfd(M.cur.net)}B）`
+    : `最新读数 ${nfd(M.cur.net)}B，<b style="color:var(--amber)">非区间最低</b>（区间最低 ${nfd(Math.min(...M.wk.map(x => x.net)))}B）`);
+  /* ③ 管道 */
+  const sprdBp = ext.sprd == null ? null : Math.round(ext.sprd * 100);
+  setHtml('pipe-tag', sprdBt(sprdBp));
+  setHtml('pipe-spread', `最新 <b>${nfd(M.dcur.sofr, 2)}% − ${nfd(M.dcur.iorb, 2)}% = <s style="color:${sprdBp < 0 ? 'var(--green)' : 'var(--red)'}">${sprdBp > 0 ? '+' : ''}${sprdBp}bp</s></b> <span style="color:var(--tx3);font-size:11px">(${md(M.dcur.d)})</span>`);
+  /* ④ 金丝雀 */
+  setHtml('y10-tag', `官方最新 ${nfd(M.ycur.v, 2)}%`);
+  setHtml('y10-note', `${us(M.y10[0].d)} 的 ${nfd(M.y10[0].v, 2)}% → ${us(M.ycur.d)} 收 <b>${nfd(M.ycur.v, 2)}%</b>。区间 ${nfd(Math.min(...M.y10.map(x => x.v)), 2)}%–${nfd(Math.max(...M.y10.map(x => x.v)), 2)}%。<b>${M.ycur.v >= 5 ? '长端收于 5% 关口之上' : '长端暂失 5%，但仍在区间上沿'}</b>，对长久期无现金流资产构成持续估值压制。`);
+  setHtml('btc-vs-ma', ext.vs200 == null ? '无法核验' :
+    `MA120 ${nfd(M.b.ma120, 0)}（<b style="color:${ext.vs120 > 0 ? 'var(--green)' : 'var(--red)'}">${pc(ext.vs120, 1)}</b>） · MA200 ${nfd(M.b.ma200, 0)}（<b style="color:${ext.vs200 > 0 ? 'var(--green)' : 'var(--red)'}">${pc(ext.vs200, 1)}</b>）`);
+  setHtml('btc-tag', ext.vs200 == null ? '均线待核验' : (ext.vs120 > 0 && ext.vs200 > 0 ? '站上双均线' : ext.vs200 < 0 ? '跌破 MA200' : '均线之间'));
+  setHtml('inf-live', infRows(M, ext));
+  /* ⑤ 因果链数值 */
+  setHtml('c-a', `最新周三（${md(M.cur.d)}）报税季使 TGA 单周 <strong>${nfd(ext.tchg) > 0 ? '+' : ''}${nfd(ext.tchg)}B</strong>（${nfd(M.prv.tga)} → ${nfd(M.cur.tga)}），同期美联储总资产变化 ${nfd(ext.wchg)}B，净流动性 <strong>${nfd(ext.nchg)}B（${pc(ext.nchg / M.prv.net * 100, 1)}）</strong> → ${nfd(M.cur.net)}。`);
+  setHtml('c-a2', `叠加 ON RRP 仅 ${nfd(M.cur.rrp, 2)}B，<strong>缓冲垫消失</strong>：后续财政发债的冲击 1:1 直达银行准备金。`);
+  setHtml('c-b', `PPI 终端需求同比 <b>${pc(M.ppi.yoy, 1)}</b>（环比 ${pc(M.ppi.mom)}）+ 核心 CPI 同比 ${pc(M.core.yoy, 1)} + 失业率降至 ${nfd(M.sam.v, 1)}% + 零售环比 ${pc(M.ret.mom)} → <strong>经济不需要宽松</strong>。`);
+  setHtml('c-c2', ext.vs120 == null || ext.vs200 == null
+    ? `<strong>风险偏好腿：</strong>BTC 实时 ${nfd(Math.round(M.b.spot), 0)}，但日线历史不可达，<b>120/200 日均线位置无法核验</b>——本链只作定性，不作点位。`
+    : `<strong>风险偏好腿：</strong>BTC 实时 ${nfd(Math.round(M.b.spot), 0)}，120 日线${ext.vs120 > 0 ? '上方 +' + nfd(ext.vs120, 1) + '%' : '下方 ' + nfd(ext.vs120, 1) + '%'}、200 日线${ext.vs200 > 0 ? '上方 +' + nfd(ext.vs200, 1) + '%' : '下方 ' + nfd(ext.vs200, 1) + '%'}——中期趋势<b>${ext.vs200 > 0 ? '完好' : '已破位'}</b>，末端金丝雀<strong>${ext.vs200 > 0 ? '未报警' : '报警'}</strong>。`);
+  setHtml('c-c1', `<strong>折现率腿：</strong>10Y 最新收盘 <strong>${nfd(M.ycur.v, 2)}%</strong>（${us(M.ycur.d)}），${M.ycur.v >= 5 ? '<strong>5% 关口之上</strong>' : '关口下方徘徊'}；管道利差 ${sprdBp > 0 ? '转正 +' : ''}${sprdBp}bp。`);
+}
+function sprdBt(b) { return b == null ? '取数中' : (b < 0 ? '利差 ' + b + 'bp · 未挤兑' : '利差 +' + b + 'bp · 需警惕'); }
+function infRows(M, e) {
+  const r = (l, v, c) => `<div class="kv"><span>${l}</span><span class="num" style="${c || ''}">${v}</span></div>`;
+  const cc = x => x > 3 ? 'color:var(--red)' : x > 2.5 ? 'color:var(--amber)' : 'color:var(--green)';
+  return r('PPI 终端需求 同比', `<b>${pc(M.ppi.yoy, 1)}</b> 环比 ${pc(M.ppi.mom)}`, cc(M.ppi.yoy))
+    + r('PPI 全部商品 同比', `${pc(M.ppiAll.yoy, 1)}（PPIACO ${nfd(M.ppiAll.v, 1)}）`, 'color:var(--red)')
+    + r('核心 CPI 同比 / 环比', `<b>${pc(M.core.yoy, 1)}</b> / ${pc(M.core.mom, 2)}`, cc(M.core.yoy))
+    + r('核心 PCE 同比 / 环比', `${pc(M.pce.yoy, 1)} / ${pc(M.pce.mom, 2)}`, cc(M.pce.yoy))
+    + r('失业率 · 萨姆', `<b style="color:${M.sam.hit ? 'var(--red)' : 'var(--green)'}">${nfd(M.sam.v, 1)}% · ${M.sam.hit ? '已触发' : '未触发'}</b>（差 ${nfd(M.sam.gap, 2)}pp）`, '')
+    + r('零售销售 环比', `<b>${pc(M.ret.mom)}</b>（${md(M.ret.d)}）`, M.ret.mom < 0 ? 'color:var(--red)' : 'color:var(--green)');
+}
+
+/* ===== 渲染：BTC 面板 ===== */
+function renderBtc(M) {
+  const el = $('btc-live'), ev = $('btc-vs'), es = $('btc-src');
+  if (el) el.innerHTML = `$${nfd(Math.round(M.b.spot), 0)} <u style="font-size:11px;color:var(--tx3)">@ ${TICK}</u>`;
+  if (ev) {
+    const hi = M.b.closes && M.b.closes.length ? Math.max(...M.b.closes) : M.b.spot;
+    const d = M.b.closes && M.b.closes.length ? (M.b.spot / hi - 1) * 100 : null;
+    ev.textContent = d == null ? '—' : (d >= 0 ? '区间新高 +' : '距区间高点 ') + d.toFixed(2) + '%';
+    ev.style.color = d >= 0 ? 'var(--green)' : 'var(--amber)';
+  }
+  if (es) es.textContent = M.b.n ? `${M.b.n} 源中位 · ` + (M.b.used || []).join(', ') + (M.b.dropped && M.b.dropped.length ? '  ✕ ' + M.b.dropped.join(', ') : '') : '经本地服务取数失败，显示快照';
+  const ep = $('btc-perf');
+  if (ep) {
+    const f = (v, d) => v == null ? '—' : (v >= 0 ? '+' : '') + v.toFixed(2) + '%（基准 ' + md(d) + '）';
+    ep.textContent = M.b.perf_m == null && M.b.perf_q == null ? '日线历史不可用，无法计算'
+      : f(M.b.perf_m, M.b.perf_m_d) + ' / ' + f(M.b.perf_q, M.b.perf_q_d);
+    ep.style.color = (M.b.perf_m == null ? '' : M.b.perf_m >= 0 ? 'var(--green)' : 'var(--amber)');
+  }
+}
+
+/* ===== 状态栏 ===== */
+function status(msg, cls) { const s = $('livestat'); if (s) { s.className = 'ls ' + (cls || ''); s.textContent = msg; } }
+function ageLine(M) {
+  const parts = [];
+  const add = (l, d) => d && parts.push(l + ' ' + (d.length > 10 ? md(d) : us(d)));
+  add('WALCL/TGA', M.cur.d); add('RRP', last(rows('rrp').v).d); add('SOFR', M.dcur.d);
+  add('10Y', M.ycur.d); parts.push('BTC ' + TICK);
+  add('CPI/PPI/零售', M.core.d);
+  return parts.join(' · ');
+}
+function renderAll() {
+  const M = derive();
+  if (!M) { status('官方序列为空 · 等待取数完成', ''); return; }
+  const B = build(M);
+  IND = B.out;
+  IND.forEach(d => { d.live = d.k === 'btc' ? !!(BTC && BTC.ok) : d.k === 'y10' ? !!(TRE && TRE.ok) : rows(d.k).live; d.src = d.k === 'btc' && BTC && BTC.ok ? `ccxt ${BTC.n} 家中位（日线 ${BTC.histFrom || '—'}）` : (SRCNAME[d.k] || ''); if (!AGE[d.k]) { const z = rows(d.k).v.at(-1); AGE[d.k] = d.k === 'btc' ? (BTC && BTC.ok ? TICK : '内置快照 9/21') : z ? z.d : ''; } });
+  applyF();
+  renderNet(M, B.nchg);
+  renderRates(M); renderY10(M); renderBtc(M);
+  renderText(M, B, B);
+  const okN = KEYS.filter(k => RAW[k] && RAW[k].ok).length + (BTC && BTC.ok ? 1 : 0) + (TRE && TRE.ok ? 1 : 0);
+  LIVE_OK = okN >= 3;
+  status(LIVE_OK ? `实时 ${okN}/${KEYS.length + 2} 源 · 官方读数 ${ageLine(M)}` : `本地服务 /api 不可达（${errBrief()}）— 页面显示 9/21 快照`, LIVE_OK ? 'ok' : 'bad');
+  const a = $('asof');
+  if (a) a.textContent = (LIVE_OK ? '实时数据 · ' : '快照模式 · ') + '刷新即重新取数 · ' + new Date().toLocaleString('zh-CN', { hour12: false });
+  const tg = document.querySelector('#board .tagline');
+  if (tg) tg.textContent = LIVE_OK ? '全部 11 项经本地代理层实时取数' : '取数失败 · 显示 9/21 快照';
+}
+function errBrief() { const e = Object.entries(RAW).filter(([, v]) => v && !v.ok).map(([k, v]) => k); return e.length ? e.slice(0, 3).join(',') + ' 等' : (window.__apierr || '未启动'); }
+const SRCNAME = { walcl: 'FRED WALCL', tga: 'FRED WDTGAL', rrp: 'FRED RRPONTSYD', sofr: 'FRED SOFR', iorb: 'FRED IORB', dgs10: 'FRED DGS10', unrate: 'FRED UNRATE', ppi: 'FRED PPIACO', ppifd: 'FRED WPSFD49201', cpi: 'FRED CPILFESL', pce: 'FRED PCEPILFE', rsafs: 'FRED RSAFS', y10: '美国财政部', btc: 'ccxt 交易所中位' };
+
+/* ===== 同步：刷新页面即重新取数（jget 公共实现见 staic/common.js） ===== */
+let busy = false;
+const WAVE1 = ['walcl', 'tga', 'rrp', 'sofr', 'iorb'];
+const WAVE2 = ['unrate', 'cpi', 'ppifd', 'ppi', 'pce', 'rsafs'];
+async function one(k) {
+  try {
+    const j = await jget('/api/liquidity/fred?series=' + k + (F ? '&force=1' : ''), 45000);
+    RAW[k] = { ok: true, rows: j.rows, source: j.source };
+    if (j.latest) AGE[k] = j.latest.d;
+  } catch (e) { RAW[k] = { ok: false, error: String(e.message || e) }
+  } finally { renderAll(); }
+}
+let F = false;
+async function sync(force) {
+  if (busy) return; busy = true; F = !!force;
+  const b = $('rf'); if (b) b.disabled = true;
+  TICK = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+  status('同步中… 经代理串行取官方序列（约 10 秒）', '');
+  /* 上游必须串行：并发 12 个 FRED 请求经代理实测全部失败，串行 12 个 10.5 秒全通过 */
+  const wave = async ks => { for (const k of ks) await one(k); };
+  await Promise.all([
+    wave(WAVE1),
+    jget('/api/liquidity/treasury' + (F ? '?force=1' : ''), 45000).then(j => { TRE = j; AGE.y10 = j.rows[0] ? j.rows[0].d : ''; }).catch(e => { TRE = { ok: false, error: String(e.message || e) } }).then(renderAll),
+    jget('/api/liquidity/btc' + (F ? '?force=1' : ''), 60000).then(j => { BTC = j; AGE.btc = TICK; }).catch(e => { BTC = { ok: false, error: String(e.message || e) } }).then(renderAll),
+  ]);
+  await wave(WAVE2);
+  window.__apierr = '';
+  renderAll();
+  if (b) b.disabled = false;
+  busy = false;
+}
+$('rf').addEventListener('click', () => sync(true));
+Board.nav('tabs');             // 顶栏：看板页面导航（公共导航见 common.js）
+renderAll();                    // 先用快照出画面
+sync();                         // 再拉实时
+Board.autoSync(sync, 60000);
+
+
+/* ---- 主题切换联动 ---- */
+addEventListener('themechange', () => renderAll());   /* 图表取色在生成时写死：切主题后按当前变量重绘 */
+</script>
+</body>
+</html>

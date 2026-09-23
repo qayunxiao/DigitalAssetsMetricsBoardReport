@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>全球优质资产配置 · 8 个全球市场的贪婪恐慌深度</title>
+<meta name="description" content="比特币、黄金、纳斯达克、标普、港股、A股、欧洲、日本的恐慌/贪婪深度实时面板；全球恐慌温度、历史画像与美债利率分位。数据经本地服务向官方节点实时取数，判级由页面代码按公开规则实时生成。">
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="common.css">
+<script>try{document.documentElement.dataset.theme=localStorage.getItem("board-theme")||"dark"}catch(e){}</script>
+<style>
+  /* 页面特有版式 */
+  .temp-big{font-family:var(--mono);font-size:52px;font-weight:700;letter-spacing:-.03em;line-height:1}
+  .ramp{height:10px;border-radius:5px;margin:12px 0 4px;
+    background:linear-gradient(90deg,hsl(140,65%,45%),hsl(90,55%,45%),hsl(45,70%,50%),hsl(20,80%,52%),hsl(0,75%,55%))}
+  .ramp-lb{display:flex;justify-content:space-between;font-size:11px;color:var(--tx3)}
+  .strip{position:relative;height:120px;margin:26px 0 6px}
+  .strip .rail{position:absolute;left:0;right:0;top:56px;height:8px;border-radius:4px;
+    background:linear-gradient(90deg,hsl(140,65%,40%),hsl(90,55%,42%),#4a4a44,hsl(20,80%,50%),hsl(0,75%,52%))}
+  .strip .tier{position:absolute;top:36px;height:48px;border-left:1px dashed var(--line2)}
+  .strip .tier b{position:absolute;top:-22px;left:-14px;font-size:10px;color:var(--tx3);font-weight:400;white-space:nowrap}
+  .dot{position:absolute;top:44px;transform:translateX(-50%);text-align:center}
+  .dot i{display:block;width:12px;height:12px;border-radius:50%;border:2px solid #0e0f10;margin:13px auto 3px}
+  .dot em{font-style:normal;display:block;font-family:var(--mono);font-size:11px}
+  .dot span{display:block;font-size:10.5px;color:var(--tx3);white-space:nowrap}
+  .dot.below i{margin-top:-3px}
+  .acard{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px 17px 14px}
+  .acard .hd{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap}
+  .acard .sym{font-family:var(--mono);font-size:10.5px;color:var(--tx3);border:1px solid var(--line2);border-radius:4px;padding:1px 6px}
+  .acard .nm{font-size:14.5px;font-weight:600}
+  .acard .px{margin-left:auto;text-align:right}
+  .acard .px b{font-family:var(--mono);font-size:20px;font-weight:650;letter-spacing:-.02em}
+  .acard .px i{font-style:normal;font-size:10.5px;color:var(--tx3);margin-left:4px}
+  .acard .live{font-size:10px;color:var(--green);font-family:var(--mono)}
+  .dp{display:flex;align-items:center;gap:10px;margin:10px 0 4px}
+  .dp b{font-family:var(--mono);font-size:30px;font-weight:700;letter-spacing:-.02em}
+  .dp .tierb{font-size:11px;font-weight:600;padding:3px 9px;border-radius:5px}
+  .dp .quota{font-size:11px;color:var(--tx2);font-family:var(--mono)}
+  .dp small{font-size:10.5px;color:var(--tx3);margin-left:auto}
+  .arow{display:flex;justify-content:space-between;gap:8px;font-size:11.5px;color:var(--tx2);padding:3px 0;border-bottom:1px dashed var(--line)}
+  .arow:last-of-type{border-bottom:none}
+  .arow b{font-family:var(--mono);font-weight:600;color:var(--tx)}
+  .pcv{margin-top:8px}
+  .pcv .cap{font-size:10px;color:var(--tx3);font-family:var(--mono);display:flex;justify-content:space-between}
+  .fnote{font-size:11px;color:var(--tx3);margin-top:8px;line-height:1.6}
+  /* 一行两个：卡片里有价格行 + 两张图，三列会把图挤到看不清 */
+  .agrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px}
+  @media(max-width:760px){.agrid{grid-template-columns:1fr}}
+  .ratebar{position:relative;height:10px;border-radius:5px;background:#0b0c0d;border:1px solid var(--line2);margin:7px 0 3px}
+  .ratebar i{position:absolute;top:-3px;width:3px;height:15px;border-radius:2px;background:var(--gold)}
+  .ratebar em{position:absolute;top:-20px;transform:translateX(-50%);font-style:normal;font-size:10px;font-family:var(--mono);color:var(--tx2)}
+  .rk{display:flex;justify-content:space-between;font-size:10.5px;color:var(--tx3);font-family:var(--mono)}
+  .stars{color:var(--gold)}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="bar">
+    <div class="brand"><b><a href="../Index.html">Lattice</a></b><span>Quality Allocation Desk</span></div>
+    <nav class="tabs" id="tabs" aria-label="看板导航"></nav>
+    <div class="asof num" id="asof"></div>
+    <div class="lbar"><button class="rf" id="rf" type="button">↻ 刷新实时</button><span class="ls" id="livestat">实时同步中…</span></div>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <!-- 全球恐慌温度 -->
+  <div class="verdict">
+    <div class="vcard" id="temp-card">
+      <div class="vlabel">今日全球恐慌温度</div>
+      <div class="temp-big" id="temp-num">—</div>
+      <div class="vsub" id="temp-sub">全部标的恐慌深度等权合成 · 就绪后显示</div>
+      <div class="ramp"></div>
+      <div class="ramp-lb"><span>越绿 · 越恐慌 · 越便宜</span><span>越红 · 越贪婪 · 越贵</span></div>
+    </div>
+    <div class="vcard">
+      <div class="vlabel">当前分布判语</div>
+      <div class="vbig" id="dist-sum" style="font-size:19px;line-height:1.4">等待取数…</div>
+      <div class="vsub" id="dist-sum2">统计恐慌区 / 贪婪区标的数，指出最恐慌与最贪婪的标的（全实时生成）。</div>
+    </div>
+    <div class="vcard">
+      <div class="vlabel">档位标尺（恐慌四档 / 贪婪四档）</div>
+      <div class="kv"><span>4级恐慌 ≤ <b class="num">2</b> · 配额 <b class="num">40%</b></span><span>3级恐慌 ≤ <b class="num">5</b> · <b class="num">30%</b></span></div>
+      <div class="kv"><span>2级恐慌 ≤ <b class="num">8</b> · <b class="num">20%</b></span><span>1级恐慌 ≤ <b class="num">18</b> · <b class="num">10%</b></span></div>
+      <div class="kv"><span>18–65 不操作</span><span>贪婪 ≥ <b class="num">65/78/88/95</b> 四档</span></div>
+      <div class="vsub" style="font-size:11.5px">贪婪档只标颜色<b>无卖出逻辑</b>；配额=该档恐慌触发时新增资金投向参考。<span class="stars">★</span> 沿用参考站标注：主理人核心长期配置，非系统信号。</div>
+    </div>
+  </div>
+
+  <!-- 当前分布 -->
+  <section id="dist">
+    <div class="shead"><h2>当前分布</h2><span class="tagline">横轴 = 恐慌深度分位（0 恐慌极值 → 100 贪婪极值）</span><div class="rule"></div></div>
+    <div class="panel"><div class="strip" id="strip"><div class="rail"></div></div>
+      <div class="ramp-lb" style="margin-top:2px"><span>0</span><span>2</span><span>5</span><span>8</span><span>18</span><span>50</span><span>65</span><span>78</span><span>88</span><span>95</span><span>100</span></div>
+    </div>
+  </section>
+
+  <!-- 资产卡 -->
+  <section id="assets">
+    <div class="shead"><h2 id="agrid-h">全球市场</h2><span class="tagline">收盘价 · 对数价格轴 · BTC 现价 30~60 秒刷新</span><div class="rule"></div></div>
+    <div class="agrid" id="agrid"></div>
+  </section>
+
+  <!-- 美债利率 -->
+  <section id="rates">
+    <div class="shead"><h2>美债利率 · 独立观察</h2><span class="tagline">利率分位与股债温差：不进全球温度，纯展示</span><div class="rule"></div></div>
+    <div class="trio">
+      <div class="panel">
+        <h3>2年/10年利差 <span class="risk r-lo" id="spr-tag" style="position:static;margin-left:auto">—</span></h3>
+        <div class="ph" id="spr-ph">% · FRED DGS10−DGS2（CNBC 实时可达时 2Y 用实时值）</div>
+        <div class="val num" id="spr-val" style="font-size:28px">—</div>
+        <div class="dt" id="spr-note">读取中…</div>
+        <div class="note" style="margin-top:14px">今日股债温差 = 全球恐慌温度 − TLT 恐慌深度：<b class="num" id="gap-val">—</b><br>历史上两者同时进入恐慌区：2020-03 · 2022 多个月份 · 2025-04（加息/流动性冲击的共振样本）。</div>
+      </div>
+      <div class="panel">
+        <h3>3个月美债收益率</h3>
+        <div class="ph">% · FRED DGS3 十年窗口 · ≈短债理财/货币基金收益参考</div>
+        <div class="val num" id="r3-val" style="font-size:28px">—</div>
+        <div class="ratebar"><i id="r3-mk" style="left:50%"></i><em id="r3-mkl" style="left:50%">—</em></div>
+        <div class="rk"><span id="r3-min">—</span><span>历史分位 <b id="r3-pct">—</b></span><span id="r3-max">—</span></div>
+      </div>
+      <div class="panel">
+        <h3>10年期美债收益率</h3>
+        <div class="ph">% · FRED DGS10 十年窗口 · 折现率锚</div>
+        <div class="val num" id="r10-val" style="font-size:28px">—</div>
+        <div class="ratebar"><i id="r10-mk" style="left:50%"></i><em id="r10-mkl" style="left:50%">—</em></div>
+        <div class="rk"><span id="r10-min">—</span><span>历史分位 <b id="r10-pct">—</b></span><span id="r10-max">—</span></div>
+        <div class="fnote">颜色/位置只表示利率在<b>自身十年区间</b>中的位置，与资产恐慌色带无关。利率急速上行常压缩股票估值（2022），急速下坠常是避险信号（2020-03、2008）而非利好。</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 判级规则 -->
+  <section id="rules">
+    <div class="shead"><h2>判级规则（公开可复核）</h2><span class="tagline">自定算法，非参考站私有口径的复刻</span><div class="rule"></div></div>
+    <div class="panel">
+      <div class="formula">
+        <b>恐慌深度(0–100) = 三个子分位的均值</b>（各子分位 = 当前值在自身<b>近 756 个交易日（约 3 年）</b>窗口中的分位，窗口内该序列至少 252 个有效值，否则该子项剔除；不足两个子项 → 标「不可核验」）：<br>
+        ① 乖离率 price/MA200 − 1 ② 20 日动量 price/price<sub>-21</sub> − 1 ③ 52 周高点回撤 price/max(price<sub>-252..-1</sub>) − 1<br>
+        <b>分位一律按收盘价计算</b>，不随盘中价变动；BTC 历史画像亦用 Yahoo 收盘，现价（ccxt 多所中位）只作读数展示。<br>
+        <b>档位：</b>4级恐慌 ≤2 → 3级 ≤5 → 2级 ≤8 → 1级 ≤18 | 不操作 18–65 | 1级贪婪 ≥65 → 2级 ≥78 → 3级 ≥88 → 4级 ≥95。<br>
+        <b>全球恐慌温度</b> = 可达标的恐慌深度的等权均值（缺数据标的剔除，不做乐观推定）。<b>股债温差</b> = 全球温度 − TLT 恐慌深度。TLT 为独立观察标的，不进温度。
+      </div>
+      <div class="note">贪婪档没有卖出逻辑——高位系统的「贵」由颜色表达；这与参考站口径一致：<b>对长牛资产机械卖出长期跑输持有</b>，四档恐慌的配额只回答「当前读数落在哪一档」，真实触发还应叠加连续天数等个人纪律，本面板不代替决策。</div>
+    </div>
+  </section>
+
+  <!-- 来源与缺口 -->
+  <section id="src">
+    <div class="shead"><h2>数据来源与检索缺口</h2><span class="tagline">官方节点优先</span><div class="rule"></div></div>
+    <div class="panel"><div class="srcs">
+      <a href="https://query1.finance.yahoo.com/v8/finance/chart/%5EGSPC" target="_blank" rel="noopener">Yahoo chart · 9 标的 + TLT 十年日线（经本地服务白名单中转）</a>
+      <a href="https://fred.stlouisfed.org/series/DGS3" target="_blank" rel="noopener">FRED · DGS3 3个月国库券利率</a>
+      <a href="https://fred.stlouisfed.org/series/DGS10" target="_blank" rel="noopener">FRED · DGS10 10年期利率</a>
+      <a href="/api/crash/yields" target="_blank" rel="noopener">2Y 现值 · CNBC 实时（失败自动降级 FRED DGS2）</a>
+      <a href="/api/allocation/btc" target="_blank" rel="noopener">BTC 现价 · ccxt 六所中位数（binance/okx/bybit/kraken/gate/coinbase，与流动性页共享缓存）</a>
+      <a href="/api/health" target="_blank" rel="noopener">本地服务 · /api/health（同源中转，绕开浏览器 CORS）</a>
+    </div>
+    <div id="gaps" class="gaps" style="margin-top:14px">
+      <b>口径说明与检索缺口（本次刷新）</b>
+      <ul id="gaplist"><li>等待首次同步…</li></ul>
+    </div>
+    <div id="revs" data-show="{{SHOW_FIX}}" style="margin-top:16px">
+      <div class="rev"><b>修订 · 2026-09-22 · v1</b> 面板新建：原 GlobalQualityAssetAllocation 为空页。按 Liquidity 模式落地「零依赖本地服务 + 原生 HTML」：api/allocation.py 只回原始序列，五资产质量分→建议权重判级在页面代码按公开阈值实时生成。</div>
+      <div class="rev"><b>修订 · 2026-09-22 · v2</b> 整页改版为参考 onebitking.com「全球优质资产配置 · 9 个全球市场的贪婪恐慌深度」的展示结构：全球恐慌温度、分布热条、9 市场卡片 + 历史画像、美债利率独立面板。恐慌深度算法<b>不抄对方私有口径</b>，改用本页公开的三子分位自定规则（乖离率 / 20日动量 / 52周回撤，756 日滚动窗口），档位线 2/5/8/18 与 65/78/88/95 沿用参考站展示。后端资产白名单扩至 9 标的 + TLT，序列升级为 10 年日线（供历史画像与滚动分位）。v1 的质量分→建议权重模型整体退役。</div>
+      <div class="rev"><b>修订 · 2026-09-22 · v3</b> 卡片改为一行两个（原三列把两张图挤到看不清）；顺序调整为 比特币/黄金 → 纳斯达克100/标普500 → 恒生/上证 → 欧洲斯托克50/日经225；<b>移除印度 Nifty50 卡片</b>，本页现为 8 个市场 + TLT 观察位（后端 <span class="num">^NSEI</span> 白名单按「只增不减」保留，只是本页不再请求）。标的数量不再写死，一律由 <span class="num">SYMS.length</span> 得出。</div>
+    </div>
+    </div>
+  </section>
+
+</div>
+
+<footer>
+  <p>本面板为基于公开数据的量化情绪/估值参考，非个性化投资建议。判级阈值与算法黑纸白字列于「判级规则」区，可逐条复核。</p>
+  <p style="margin-top:8px">数据链路：页面 → 本地服务 <span class="num">/api/allocation/*</span>（+ <span class="num">/api/crash/yields</span>）→（代理，见 <span class="num">config.ini</span>）→ Yahoo / FRED / CNBC / ccxt 官方节点。点击「↻ 刷新实时」强制穿透缓存重取；任一序列取数失败在对应卡片标注并剔除出全球温度，绝不以滞后值冒充实时值。</p>
+</footer>
+
+<script src="common.js"></script>
+<script>
+/* =====================================================================
+   贪婪恐慌深度模型 —— 页面代码按公开规则实时生成（见「判级规则」区）。
+   服务端（api/allocation.py）只回 10 年日线收盘与利率原始序列。
+   ===================================================================== */
+const SYMS = [
+  { s: 'BTC-USD',   n: '比特币',      cur: '$',     cy: 'USD', star: true, live: true },
+  { s: 'GC=F',      n: '黄金期货',    cur: '$',     cy: 'USD', star: true,  note: '前月连续合约，换月日价格跳空可能被 20 日动量/波动误读，仅供参考' },
+  { s: '^NDX',      n: '纳斯达克100', cur: '$',     cy: 'USD', star: true },
+  { s: '^GSPC',     n: '标普500',     cur: '$',     cy: 'USD', star: true },
+  { s: '^HSI',      n: '恒生指数',    cur: 'HK$',   cy: 'HKD' },
+  { s: '000001.SS', n: '上证指数',    cur: '¥',     cy: 'CNY' },
+  { s: '^STOXX50E', n: '欧洲斯托克50', cur: '€',    cy: 'EUR' },
+  { s: '^N225',     n: '日经225',     cur: '¥',     cy: 'JPY' },
+];
+const OBS = { s: 'TLT', n: 'TLT 20Y+美债ETF', cur: '$', cy: 'USD' };   // 独立观察，不进温度
+
+const W = 756, WMIN = 252;                     // 分位窗口：近 756 交易日，最少 252 个有效值
+const PANIC_L = [2, 5, 8, 18], GREED_L = [65, 78, 88, 95];
+const QUOTA = { 4: '投 40%', 3: '投 30%', 2: '投 20%', 1: '投 10%' };
+
+/* ---- 子序列 ---- */
+function subSeries(v) {
+  const n = v.length;
+  const dev = Array(n).fill(null), mom = Array(n).fill(null), dd = Array(n).fill(null);
+  let run = 0; const win = [];                  // MA200 滚动和
+  for (let i = 0; i < n; i++) {
+    run += v[i]; win.push(v[i]);
+    if (win.length > 200) run -= win.shift();
+    if (i >= 199) { const ma = run / win.length; dev[i] = v[i] / ma - 1; }
+    if (i >= 20) mom[i] = v[i] / v[i - 20] - 1;
+    if (i >= 252) { let hi = -Infinity; for (let j = i - 251; j <= i; j++) if (v[j] > hi) hi = v[j]; dd[i] = v[i] / hi - 1; }
+  }
+  return [dev, mom, dd];
+}
+function pctAt(series, i) {                     // 当前值在最近 W 个有效观测中的分位（0-100）
+  const cur = series[i]; if (cur == null) return null;
+  let n = 0, le = 0;
+  for (let j = Math.max(0, i - W + 1); j <= i; j++) {
+    const x = series[j]; if (x == null) continue;
+    n++; if (x <= cur) le++;
+  }
+  return n >= WMIN ? le / n * 100 : null;
+}
+function depthOf(v, rows) {                     // {cur, series(每5日采样，供历史画像), parts}
+  const subs = subSeries(v), n = v.length;
+  if (!n) return null;
+  const i = n - 1;
+  const parts = subs.map(s => pctAt(s, i)).filter(x => x != null);
+  const cur = parts.length >= 2 ? parts.reduce((a, b) => a + b, 0) / parts.length : null;
+  const hist = [];
+  for (let j = 0; j < n; j += 5) {
+    const ps = subs.map(s => pctAt(s, j)).filter(x => x != null);
+    if (ps.length >= 2) hist.push({ d: rows[j].d, v: Math.round(ps.reduce((a, b) => a + b, 0) / ps.length * 10) / 10 });
+  }
+  return cur == null ? null : { cur: Math.round(cur * 10) / 10, parts: parts.length, hist };
+}
+
+/* ---- 档位与配色（公开规则）---- */
+function tierOf(v) {
+  if (v <= 2) return { k: 4, t: '4级恐慌', quota: QUOTA[4], c: 'lo' };
+  if (v <= 5) return { k: 3, t: '3级恐慌', quota: QUOTA[3], c: 'lo' };
+  if (v <= 8) return { k: 2, t: '2级恐慌', quota: QUOTA[2], c: 'lo' };
+  if (v <= 18) return { k: 1, t: '1级恐慌', quota: QUOTA[1], c: 'lo' };
+  if (v >= 95) return { k: 4, t: '4级贪婪', quota: null, c: 'hi' };
+  if (v >= 88) return { k: 3, t: '3级贪婪', quota: null, c: 'hi' };
+  if (v >= 78) return { k: 2, t: '2级贪婪', quota: null, c: 'hi' };
+  if (v >= 65) return { k: 1, t: '1级贪婪', quota: null, c: 'hi' };
+  return { k: 0, t: '不操作', quota: null, c: 'md' };
+}
+const depthColor = v => `hsl(${140 - 1.4 * Math.max(0, Math.min(100, v))},65%,52%)`;
+function nextPanicGap(v) {                      // 距下一个更恐慌档位
+  if (v > 18) return `离 1级恐慌 还差 ${(v - 18).toFixed(1)}`;
+  if (v > 8) return `离 2级恐慌 还差 ${(v - 8).toFixed(1)}`;
+  if (v > 5) return `离 3级恐慌 还差 ${(v - 5).toFixed(1)}`;
+  if (v > 2) return `离 4级恐慌 还差 ${(v - 2).toFixed(1)}`;
+  return '已在最深恐慌档';
+}
+
+/* ---- 状态 ---- */
+const A = {};                                   // sym -> api 响应 / {ok:false,error}
+let BTC = null, MAC = null, YLD = null;
+
+/* ---- 图表（对数价格轴 / 分位带）---- */
+function logPriceChart(el, rows, color) {
+  const v = rows.map(r => r.v).filter(x => x > 0);
+  if (v.length < 2) { el.innerHTML = ''; return; }
+  const lv = v.map(Math.log), [mn, mx] = domOf(lv, .06);
+  const w = 300, h = 64, pad = 4, st = (w - pad * 2) / (lv.length - 1);
+  const Y = x => h - pad - (x - mn) / (mx - mn) * (h - pad * 2);
+  const path = lv.map((x, i) => `${i ? 'L' : 'M'}${(pad + i * st).toFixed(1)},${Y(x).toFixed(1)}`).join(' ');
+  el.innerHTML = `<svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" preserveAspectRatio="none" style="display:block" aria-label="十年对数价格">
+    <path d="${path}" fill="none" stroke="${color}" stroke-width="1.5" vector-effect="non-scaling-stroke"/></svg>`;
+}
+function depthHistChart(el, hist) {
+  const w = 300, h = 74, pad = 4;
+  if (!hist || hist.length < 2) { el.innerHTML = ''; return; }
+  const v = hist.map(x => x.v), st = (w - pad * 2) / (v.length - 1);
+  const Y = x => h - pad - x / 100 * (h - pad * 2);
+  const band = (a, b, col) => `<rect x="${pad}" y="${Y(b).toFixed(1)}" width="${(w - pad * 2).toFixed(1)}" height="${(Y(a) - Y(b)).toFixed(1)}" fill="${col}"/>`;
+  const path = v.map((x, i) => `${i ? 'L' : 'M'}${(pad + i * st).toFixed(1)},${Y(x).toFixed(1)}`).join(' ');
+  el.innerHTML = `<svg viewBox="0 0 ${w} ${h}" width="100%" height="${h}" preserveAspectRatio="none" style="display:block" aria-label="恐慌深度历史">
+    ${band(0, 2, 'rgba(74,222,128,.20)')}${band(2, 5, 'rgba(74,222,128,.13)')}${band(5, 8, 'rgba(74,222,128,.09)')}${band(8, 18, 'rgba(74,222,128,.06)')}
+    ${band(95, 100, 'rgba(242,85,90,.20)')}${band(88, 95, 'rgba(242,85,90,.13)')}${band(78, 88, 'rgba(242,85,90,.09)')}${band(65, 78, 'rgba(242,85,90,.06)')}
+    ${[2, 5, 8, 18, 65, 78, 88, 95].map(t => `<line x1="${pad}" x2="${w - pad}" y1="${Y(t).toFixed(1)}" y2="${Y(t).toFixed(1)}" stroke="${T('--grid')}" stroke-dasharray="2 4"/>`).join('')}
+    <path d="${path}" fill="none" stroke="${T('--gold')}" stroke-width="1.5" vector-effect="non-scaling-stroke"/></svg>`;
+}
+
+/* ---- 渲染 ---- */
+function assetMeta(s) { return SYMS.find(x => x.s === s) || OBS; }
+function depth(s) {
+  const d = A[s];
+  if (!d || !d.ok || !d.rows || d.rows.length < 260) return null;
+  const v = d.rows.map(r => r.v);
+  return depthOf(v, d.rows);
+}
+function stats52(d) {
+  const rows = d.rows, n = rows.length, cut = rows[Math.max(0, n - 252)].d;
+  let hi = -Infinity, lo = Infinity;
+  for (let i = 0; i < n; i++) if (rows[i].d >= cut) { hi = Math.max(hi, rows[i].v); lo = Math.min(lo, rows[i].v); }
+  return { hi, lo };
+}
+function renderStrip(D) {
+  const items = Object.entries(D).map(([s, d]) => ({ s, ...d })).sort((a, b) => a.cur - b.cur);
+  if (!items.length) { $('strip').innerHTML = '<div class="rail"></div>'; return; }
+  const t = s => { const x = s / 100 * 100; return x; };
+  $('strip').innerHTML = '<div class="rail"></div>'
+    + [...PANIC_L, ...GREED_L].map(v => `<div class="tier" style="left:${v}%"><b>${v}</b></div>`).join('')
+    + items.map((it, i) => {
+      const below = i % 2;
+      return `<div class="dot${below ? ' below' : ''}" style="left:${Math.max(1, Math.min(99, it.cur))}%" title="${assetMeta(it.s).n}">
+        <i style="background:${depthColor(it.cur)}"></i><em>${it.cur}</em><span>${assetMeta(it.s).n}</span></div>`;
+    }).join('');
+}
+function renderCards(D) {
+  $('agrid').innerHTML = SYMS.map(meta => {
+    const d = A[meta.s];
+    if (!d) return `<article class="acard"><div class="hd"><span class="nm">${meta.n}</span></div><div class="fnote">等待取数…</div></article>`;
+    if (!d.ok) return `<article class="acard"><div class="hd"><span class="nm">${meta.n}</span></div>
+      <div class="dt" style="color:var(--red)">${(d.error || '取数失败').slice(0, 90)}<br>已从全球温度剔除</div></article>`;
+    const dp = D[meta.s], last = d.rows.at(-1), m = stats52(d);
+    const price = meta.live && BTC && BTC.ok ? BTC.spot : last.v;
+    const closeN = meta.live && BTC && BTC.ok ? `${nfd(BTC.spot, 0)}` : nfd(last.v, last.v < 20 ? 2 : 0);
+    const t = d.rows.at(-1), hi52 = m.hi;
+    const vsHi = hi52 ? (price / hi52 - 1) * 100 : null;
+    if (!dp) return `<article class="acard"><div class="hd"><span class="sym">${meta.s}</span><span class="nm">${meta.n}${meta.star ? ' <span class="stars">★</span>' : ''}</span>
+      <span class="px"><b>${meta.cur}${closeN}</b><i>${meta.cy}</i></span></div>
+      <div class="dt">历史不足 756 日或子分位不足两个：<b style="color:var(--amber)">不可核验</b>（已剔除出全球温度）· 收盘 ${t.d}</div></article>`;
+    const tr = tierOf(dp.cur);
+    const lo100 = dp.hist.length ? dp.hist.reduce((a, b) => b.v < a.v ? b : a, dp.hist[0]) : null;
+    const lastPanic = [...dp.hist].reverse().find(x => x.v <= 18);
+    const daysAgo = lastPanic ? Math.round((Date.parse(t.d) - Date.parse(lastPanic.d)) / 864e5) : null;
+    return `<article class="acard">
+      <div class="hd"><span class="sym">${meta.s}</span>
+        <span class="nm">${meta.n}${meta.star ? ' <span class="stars">★</span>' : ''}</span>
+        <span class="px"><b>${meta.cur}${closeN}</b><i>${meta.cy}</i>${meta.live && BTC && BTC.ok ? `<div class="live">● 实时 ${BTC.n}所中位</div>` : ''}</span></div>
+      <div class="dp"><b style="color:${depthColor(dp.cur)}">${dp.cur}</b>
+        <span class="tierb" style="background:${tr.c === 'lo' ? 'rgba(74,222,128,.13);color:var(--green)' : tr.c === 'hi' ? 'rgba(242,85,90,.13);color:var(--red)' : 'rgba(232,163,61,.12);color:var(--amber)'}">${tr.t}</span>
+        <span class="quota">${tr.quota || (tr.c === 'hi' ? '无卖出逻辑' : '')}</span>
+        <small>分位</small></div>
+      <div class="arow"><span>${nextPanicGap(dp.cur)}</span><b>距 52 周高点 ${pc(vsHi, 1)}</b></div>
+      <div class="arow"><span>期内最低 ${lo100 ? lo100.v + ' · ' + md(lo100.d) : '—'}</span>
+        <b>${lastPanic ? '上次进恐慌区 ' + md(lastPanic.d) + (daysAgo != null ? ' · ' + daysAgo + ' 天前' : '') : '窗口内未进过恐慌区'}</b></div>
+      <div class="arow"><span>收盘 ${t.d}</span><b>10年区间 ${meta.cur}${nfd(m.lo, m.lo < 20 ? 2 : 0)} ~ ${meta.cur}${nfd(m.hi, m.hi < 20 ? 2 : 0)}</b></div>
+      <div class="pcv"><div class="cap"><span>${md(d.rows[0].d)}</span><span>价格 · 对数</span><span>${md(t.d)}</span></div>
+        ${logPriceChartHtml(d.rows, depthColor(dp.cur))}</div>
+      <div class="pcv"><div class="cap"><span>1级 ${PANIC_L[3]}</span><span>历史画像 · 本标的自身数据</span><span>1级 ${GREED_L[0]}</span></div>
+        ${depthHistHtml(dp.hist)}</div>
+      ${meta.note ? `<div class="fnote">${meta.note}</div>` : ''}
+    </article>`;
+  }).join('');
+}
+/* 图表直接返回 svg 字符串（渲染器与上面两函数共用） */
+function logPriceChartHtml(rows, color) { const el = document.createElement('div'); logPriceChart(el, rows, color); return el.innerHTML; }
+function depthHistHtml(hist) { const el = document.createElement('div'); depthHistChart(el, hist); return el.innerHTML; }
+
+function renderRates() {
+  // 2Y/10Y
+  if (YLD && YLD.ok) {
+    const sp = YLD.us10y.v - YLD.us2y.v;
+    $('spr-val').textContent = (sp >= 0 ? '+' : '') + nfd(sp, 2) + '%';
+    const tag = $('spr-tag');
+    const [txt, cl] = sp < -0.5 ? ['深度倒挂', 'hi'] : sp < 0 ? ['轻度倒挂', 'hi'] : sp < 0.5 ? ['解挂/平坦(危)', 'md'] : ['正常', 'lo'];
+    tag.className = 'risk r-' + cl; tag.textContent = txt;
+    $('spr-ph').textContent = `% · 2Y ${YLD.sources.us2y} · 10Y ${YLD.sources.us10y}`;
+    $('spr-note').textContent = `2Y ${nfd(YLD.us2y.v, 2)}%（${YLD.us2y.d}）· 10Y ${nfd(YLD.us10y.v, 2)}%（${YLD.us10y.d}）`;
+  } else { $('spr-val').textContent = '取数失败'; }
+  // 利率十年分位条
+  const mk = (pre, key) => {
+    const m = MAC && MAC[key];
+    if (!m || !m.latest) { $(pre + '-val').textContent = '取数失败'; return; }
+    const his = m.history.map(r => r.v), cur = m.latest.v;
+    const lo = Math.min(...his), hi = Math.max(...his), pct = (cur - lo) / ((hi - lo) || 1) * 100;
+    $(pre + '-val').textContent = nfd(cur, 2) + '%';
+    const el = $(pre + '-mk'); el.style.left = pct.toFixed(1) + '%'; el.style.background = `hsl(${140 - 1.4 * pct},65%,52%)`;
+    const lb = $(pre + '-mkl'); lb.style.left = pct.toFixed(1) + '%'; lb.textContent = nfd(cur, 2);
+    $(pre + '-min').textContent = nfd(lo, 2) + '%';
+    $(pre + '-max').textContent = nfd(hi, 2) + '%';
+    $(pre + '-pct').textContent = pct.toFixed(1) + '%（十年内分位）';
+  };
+  mk('r3', 'dtb3'); mk('r10', 'dgs10');
+}
+
+function paint() {
+  const D = {};
+  SYMS.forEach(m => { const d = depth(m.s); if (d) D[m.s] = d; });
+  const tltd = depth(OBS.s), tlt = tltd ? tltd.cur : null;
+  const vals = Object.values(D);
+  const temp = vals.length ? Math.round(vals.reduce((a, d) => a + d.cur, 0) / vals.length * 10) / 10 : null;
+  // 温度卡
+  if (temp != null) {
+    $('temp-num').textContent = temp; $('temp-num').style.color = depthColor(temp);
+    $('temp-sub').innerHTML = `${vals.length}/${SYMS.length} 个标的等权合成 · ${new Date().toLocaleString('zh-CN', { hour12: false })} 生成<br>${vals.length < SYMS.length ? (SYMS.length - vals.length) + ' 个缺失已剔除，不做乐观推定' : '全部数据源可达'}`;
+    const panic = Object.entries(D).filter(([, d]) => d.cur <= 18), greed = Object.entries(D).filter(([, d]) => d.cur >= 65);
+    const sor = vals.reduce((a, b) => b.cur < a.cur ? b : a), hig = vals.reduce((a, b) => b.cur > a.cur ? b : a);
+    const sk = Object.keys(D).find(k => D[k] === sor), gk = Object.keys(D).find(k => D[k] === hig);
+    $('dist-sum').innerHTML = panic.length ? `${SYMS.length} 个标的里，<b style="color:var(--green)">${panic.length} 个跌进恐慌区</b>：${panic.map(([s]) => assetMeta(s).n).join('、')}。`
+      : greed.length >= 4 ? `<b style="color:var(--red)">${greed.length} 个标的处于贪婪区</b>，无恐慌标的。`
+      : `无标的处于恐慌区${greed.length ? `，${greed.length} 个处于贪婪区` : ''}。`;
+    $('dist-sum2').innerHTML = `最恐慌 <b>${assetMeta(sk).n} ${sor.cur}</b> · 最贪婪 <b>${assetMeta(gk).n} ${hig.cur}</b> · 最冷与最热差 ${(hig.cur - sor.cur).toFixed(1)} 个分位点。`;
+    $('gap-val').textContent = tlt != null ? (temp - tlt).toFixed(2) + '（TLT ' + tlt + '）' : '—（TLT 取数失败）';
+  }
+  renderStrip(D); renderCards(D); renderRates();
+
+  const live = vals.length;
+  setStatus('livestat', `实时 ${live}/9 标的 · ${new Date().toLocaleTimeString('zh-CN', { hour12: false })}`, live >= 6 ? 'ok' : 'bad');
+  $('asof').textContent = '恐慌深度实时生成 · ' + new Date().toLocaleString('zh-CN', { hour12: false });
+
+  // 缺口面板
+  const items = [];
+  SYMS.forEach(m => { if (!A[m.s]) return; if (!A[m.s].ok) items.push(`${m.n} 取数失败：${(A[m.s].error || '未返回').slice(0, 70)}（已从温度剔除）`); else if (!D[m.s]) items.push(`${m.n} 有效历史不足（分位不可核验，已剔除）`); });
+  if (BTC && !BTC.ok) items.push('BTC 实时现价不可达：' + (BTC.error || '').slice(0, 50) + '（历史画像仍用 Yahoo 收盘）');
+  if (YLD && !YLD.ok) items.push('2Y/10Y 利差不可达（CNBC 与 FRED 均失败）');
+  if (!MAC) items.push('利率宏观接口不可达：DGS3/DGS10 十年分位无法计算');
+  items.push('中国利率（LPR/存款）未接入：参考站有此板块，本项目无对应已验证取数源——按缺口列示，不臆造数值');
+  items.push('分位一律按收盘价计算，不随盘中价变动；指数按本币计价，未做汇率换算');
+  $('gaplist').innerHTML = items.map(t => `<li>${t.startsWith('中国利率') || t.startsWith('分位') ? t : '<b>' + t + '</b>'}</li>`).join('');
+}
+
+/* ---- 同步 ---- */
+let busy = false, F = false;
+async function grab(key, url) {
+  try { A[key] = await jget(url + (F ? (url.includes('?') ? '&' : '?') + 'force=1' : ''), 60000); }
+  catch (e) { A[key] = { ok: false, error: String(e.message || e) }; }
+  paint();
+}
+async function sync(force) {
+  if (busy) return; busy = true; F = !!force;
+  const b = $('rf'); if (b) b.disabled = true;
+  setStatus('livestat', `同步中… ${SYMS.length + 1} 条十年日线序列经本地服务串行取数（首轮约 30–60 秒）`, '');
+  await Promise.all([
+    ...SYMS.map(m => grab(m.s, '/api/allocation/asset?sym=' + encodeURIComponent(m.s))),
+    grab(OBS.s, '/api/allocation/asset?sym=' + OBS.s),
+    (async () => { try { BTC = await jget('/api/allocation/btc' + (F ? '?force=1' : ''), 60000); } catch (e) { BTC = { ok: false, error: String(e.message || e) }; } paint(); })(),
+    (async () => { try { MAC = await jget('/api/allocation/macro' + (F ? '?force=1' : ''), 60000); } catch (e) { MAC = null; } paint(); })(),
+    (async () => { try { YLD = await jget('/api/crash/yields' + (F ? '?force=1' : ''), 60000); } catch (e) { YLD = { ok: false }; } paint(); })(),
+  ]);
+  if (b) b.disabled = false;
+  busy = false;
+}
+$('rf').addEventListener('click', () => sync(true));
+$('agrid-h').textContent = SYMS.length + ' 个全球市场';
+Board.nav('tabs');
+sync();
+Board.autoSync(sync, 60000);
+
+/* ---- 主题切换联动 ---- */
+addEventListener('themechange', paint);
+</script>
+</body>
+</html>

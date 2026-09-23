@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>数字资产指标看板 · Lattice</title>
+<meta name="description" content="首页内嵌 BTC 数据监控，并作为三个实时风控子页面的入口：宏观流动性监控台、美股崩盘风险监测仪、全球优质资产配置。模块状态与本地取数服务健康度实时探测。">
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="staic/common.css">
+<script>try{document.documentElement.dataset.theme=localStorage.getItem("board-theme")||"dark"}catch(e){}</script>
+<style>
+  /* 主页特有版式 */
+  .entries{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+  @media(max-width:760px){.entries{grid-template-columns:1fr}}
+  a.mcard{display:block;background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    padding:20px 21px;text-decoration:none;color:var(--tx);transition:.18s;position:relative}
+  a.mcard:hover{border-color:var(--gold);transform:translateY(-2px)}
+  a.mcard .no{font-family:var(--mono);font-size:11px;color:var(--gold);letter-spacing:.12em}
+  a.mcard h2{font-family:Georgia,serif;font-size:18px;font-weight:400;margin:8px 0 9px}
+  a.mcard h2 a.tlink,div.mcard h2 a{color:inherit;text-decoration:none}
+  div.mcard{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+    padding:20px 21px;color:var(--tx);position:relative}
+  div.mcard:hover{border-color:var(--gold)}
+  div.mcard .no{font-family:var(--mono);font-size:11px;color:var(--gold);letter-spacing:.12em}
+  div.mcard h2{font-family:Georgia,serif;font-size:18px;font-weight:400;margin:8px 0 9px}
+  div.mcard p{font-size:12.5px;color:var(--tx2);line-height:1.7;min-height:62px}
+  div.mcard .go{font-size:12px;color:var(--gold);margin-top:12px;font-family:var(--mono)}
+  div.mcard .go a{color:var(--gold);text-decoration:none}
+  a.mcard p{font-size:12.5px;color:var(--tx2);line-height:1.7;min-height:62px}
+  a.mcard .go{font-size:12px;color:var(--gold);margin-top:12px;font-family:var(--mono)}
+  .st{position:absolute;top:18px;right:18px;font-size:11px;font-family:var(--mono)}
+  .st.ok{color:var(--green)}.st.bad{color:var(--red)}.st.wait{color:var(--tx3)}
+  /* 服务状态条：原来挂在 hero 里，去掉 hero 后独占正文第一行（未探测到时 :empty 自动隐藏） */
+  .svcbar{display:flex;gap:26px;flex-wrap:wrap;font-size:12px;color:var(--tx2);font-family:var(--mono);margin-bottom:18px}
+  .svcbar b{color:var(--tx);font-weight:600}
+  /* 报告状态行：放在正文里独占一行，长文本自己折行，不再把顶栏撑成两行 */
+  .rptline{display:block;font-size:12px;line-height:1.7;color:var(--tx2);margin-bottom:16px;white-space:normal;word-break:break-word}
+  .rptline:empty{display:none}
+  .lbar{flex-wrap:wrap}
+  .svcbar:empty{display:none}
+  /* 报告弹出框：成功只报一句「已发送」，3 秒自己消失；失败不自动消失（要点「看输出」），✕ 手动关 */
+  .toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);z-index:50;max-width:min(680px,92vw);
+    display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:10px;font-size:13px;line-height:1.6;
+    background:var(--panel);border:1px solid var(--green);color:var(--tx);box-shadow:0 8px 28px rgba(0,0,0,.35)}
+  .toast.err{border-color:var(--red)}
+  .toast[hidden]{display:none}
+  /* 系统资源：主机配额条形（宽度与配色全部由 pct 推导，不手填） */
+  .hb{display:grid;grid-template-columns:128px minmax(0,1fr) 210px;gap:12px;align-items:center;
+    padding:7px 0;border-bottom:1px dashed var(--line);font-size:12px}
+  .hb:last-child{border-bottom:none}
+  .hb i{font-style:normal;color:var(--tx2)}
+  .hb .track{height:8px;border-radius:4px;background:var(--bg3);border:1px solid var(--line2);overflow:hidden}
+  .hb .track b{display:block;height:100%;border-radius:4px}
+  .hb u{text-decoration:none;font-family:var(--mono);font-size:11.5px;color:var(--tx2);text-align:right;white-space:nowrap}
+  .hb.ok u{color:var(--green)}
+  .sys .kv span{white-space:nowrap}
+  .sys .kv b{text-align:right;word-break:break-all;font-weight:600}
+  .sys .kv b.ok{color:var(--green)}.sys .kv b.bad{color:var(--red)}.sys .kv b.warn{color:var(--amber)}
+  @media(max-width:640px){.hb{grid-template-columns:1fr;gap:6px}.hb u{text-align:left}}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="bar">
+    <div class="brand"><b><a href="Index.html">Lattice</a></b><span>Digital Assets Metrics Board</span></div>
+    <nav class="tabs" id="tabs" aria-label="看板导航"></nav>
+    <div class="asof num" id="asof"></div>
+    <div class="lbar"><button class="rf" id="rf" type="button">↻ 重新探测</button><button class="rf" id="rpt-crypto" type="button">加密持仓报告</button><button class="rf" id="rpt-us" type="button">US股持仓报告</button></div>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="svcbar" id="svc"></div>
+  <span class="rptline" id="rpt-msg" aria-live="polite"></span>
+
+  <section id="rpt-panel" hidden>
+    <div class="shead"><h2>持仓报告 · 脚本输出</h2><span class="tagline">按需展开：成功只弹「已发送」，这里放的是点开的 stdout / 失败输出</span><div class="rule"></div><button class="rf" id="rpt-close" type="button">收起 ✕</button></div>
+    <div class="panel"><pre id="rpt-body" class="formula" style="white-space:pre-wrap;margin:0;max-height:60vh;overflow:auto"></pre></div>
+  </section>
+
+  <section id="entries">
+    <div class="shead"><h2>监控面板</h2><span class="tagline">状态 = <span class="num">/api/&lt;模块&gt;/health</span> 实时探测 · BTC 为首页内嵌区块</span><div class="rule"></div></div>
+    <div class="entries">
+      <a class="mcard" href="#btc">
+        <span class="st wait" id="st-btc">探测中</span>
+        <div class="no">00 · BTC · 本页</div>
+        <h2>BTC 数据监控</h2>
+        <p>多所现价中位数、120/200 日均线位置、本月与本季涨跌幅、各交易所可达性与剔除原因。现价 <span class="num" id="btc-card-px">—</span>。</p>
+        <div class="go">跳到本页区块 ↓</div>
+      </a>
+      <a class="mcard" href="staic/USStockCrashMonitor.html">
+        <span class="st wait" id="st-crash">探测中</span>
+        <div class="no">01 · CRASH RISK</div>
+        <h2>美股崩盘风险监测仪</h2>
+        <p>巴菲特指标、席勒 PE、HY OAS 信用利差、10Y−2Y 利差、均线乖离、恐慌贪婪六因子加权评分；共振加分与单因子红线托底，附三次历史大顶对照。</p>
+        <div class="go">进入 →</div>
+      </a>
+      <a class="mcard" href="staic/Liquidity.html">
+        <span class="st wait" id="st-liquidity">探测中</span>
+        <div class="no">02 · LIQUIDITY</div>
+        <h2>全球宏观流动性监控台</h2>
+        <p>净流动性（WALCL − TGA − ON RRP）、SOFR−IORB 回购管道、10Y 收益率与 BTC 末端金丝雀；综合评级与操盘 SOP。</p>
+        <div class="go">进入 →</div>
+      </a>
+      <div class="mcard" id="mcard-alloc">
+        <span class="st wait" id="st-allocation">探测中</span>
+        <div class="no">03 · ALLOCATION</div>
+        <h2><a class="tlink" href="staic/GlobalQualityAssetAllocation.html">全球优质资产配置</a></h2>
+        <p>8 个全球市场 + TLT 的「贪婪恐慌深度」十年分位：均线乖离、20 日动量、距 52 周高点回撤三子分位合成，2/5/8/18 四档恐慌配买入档位；附 2Y/10Y 与股债温差。</p>
+        <div class="go"><a href="staic/GlobalQualityAssetAllocation.html">进入 →</a></div>
+      </div>
+    </div>
+  </section>
+  <section id="btc">
+    <div class="shead"><h2>BTC 数据监控</h2><span class="tagline">ccxt 多所现价中位数 + 120/200 日均线 · 与流动性页共用 <span class="num">/api/liquidity/btc</span> 的服务端缓存</span><div class="rule"></div></div>
+    <div class="duo">
+      <div class="panel">
+        <h3>现价（多所中位数）<span id="btc-badge"></span></h3>
+        <div class="ph" id="btc-pos">等待首次同步…</div>
+        <div class="val num" id="btc-spot">—</div>
+        <div style="margin-top:14px">
+          <div class="kv"><span>MA120 / 乖离</span><b class="num" id="btc-ma120">—</b></div>
+          <div class="kv"><span>MA200 / 乖离</span><b class="num" id="btc-ma200">—</b></div>
+          <div class="kv"><span>本月以来 / 本季以来</span><b class="num" id="btc-perf">—</b></div>
+        </div>
+      </div>
+      <div class="panel">
+        <h3>近 60 个交易日收盘</h3>
+        <div class="ph" id="btc-hist">—</div>
+        <div id="btc-spark"></div>
+        <div style="margin-top:14px">
+          <div class="kv"><span>可达行情源</span><b class="num" id="btc-used">—</b></div>
+          <div class="kv"><span>已剔除源</span><b class="num" id="btc-dropped">—</b></div>
+        </div>
+        <div class="note" id="btc-note" hidden></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="sys" class="sys">
+    <div class="shead"><h2>系统资源</h2><span class="tagline">上三格 = 取数服务自述（<span class="num">/api/health</span> 实时探测）· 下四条 = serv00 主机配额，<b>限额是手工抄录的快照</b>，只有「内存」那一格的用量现取 <span class="num">/api/health</span></span><div class="rule"></div></div>
+    <div class="trio">
+      <div class="panel">
+        <h3>进程与服务<span class="cadb" id="s-badge" style="margin-top:0;margin-left:auto">○ 探测中</span></h3>
+        <div class="ph">本机 <span class="num">main.py</span> 与公网 Passenger 共用同一份自述</div>
+        <div class="kv"><span>运行模式</span><b class="num" id="s-mode">—</b></div>
+        <div class="kv"><span>PID</span><b class="num" id="s-pid">—</b></div>
+        <div class="kv"><span>启动于</span><b class="num" id="s-boot">—</b></div>
+        <div class="kv"><span>已运行</span><b class="num" id="s-up">—</b></div>
+        <div class="kv"><span>服务端时间</span><b class="num" id="s-now">—</b></div>
+        <div class="kv"><span>浏览器 − 服务端</span><b class="num" id="s-skew">—</b></div>
+      </div>
+      <div class="panel">
+        <h3>运行时与配置</h3>
+        <div class="ph">参数优先级：环境变量 &gt; config.ini &gt; 代码默认</div>
+        <div class="kv"><span>Python</span><b class="num" id="s-rt">—</b></div>
+        <div class="kv"><span>api/*.py 最近改动</span><b class="num" id="s-mt">—</b></div>
+        <div class="kv"><span>内存 vs 盘上</span><b id="s-stale">—</b></div>
+        <div class="kv"><span>config.ini</span><b id="s-cfg">—</b></div>
+        <div class="kv"><span>出口代理</span><b class="num" id="s-proxy">—</b></div>
+        <div class="kv"><span>修订记录展示</span><b id="s-fix">—</b></div>
+        <div class="kv"><span>日志目录</span><b class="num" id="s-log" title="">—</b></div>
+      </div>
+      <div class="panel">
+        <h3>模块与端点</h3>
+        <div class="ph">端点名 = <span class="num">/api/&lt;模块&gt;/&lt;端点&gt;</span> 的最后一段，悬停看全名</div>
+        <div class="kv"><span>模块</span><b class="num" id="s-mods">—</b></div>
+        <div class="kv"><span>端点合计</span><b class="num" id="s-routes">—</b></div>
+        <div id="s-mod-rows"></div>
+      </div>
+    </div>
+    <div class="panel" style="margin-top:14px">
+      <h3>主机配额 · serv00<span class="cadb" id="host-badge" style="margin-top:0;margin-left:auto">○ 写死快照</span></h3>
+      <div class="ph" id="host-ph">—</div>
+      <div id="host-rows"></div>
+      <div class="note">这四条的<b>限额</b>取数服务自己算不出来（<span class="num">/api/health</span> 只有进程内信息，整机配额要调面板子进程），所以按 <span class="num">devil user info</span> 的输出手工写死在脚本的 <span class="num">HOST</span> 里，<b>不随部署自动更新</b>；换主机或面板改限额时手改那一处即可。唯一的例外是「内存」那一格的<b>用量</b>：现取自 <span class="num">/api/health</span> 的 <span class="num">rss_mb</span>，那是<b>本服务这一个进程</b>的峰值 RSS，不是账户总占用（512 MB 是账户级上限），也不是整机内存；服务没上报时这一格显示「—」而不是补一个数。条形宽度、配色、超 100% 时「画到满格但数字照抄」全部由 <span class="num">pct</span> 推导，页面里没有手填的百分比。</div>
+    </div>
+  </section>
+
+  <section id="chain" style="margin-top:34px">
+    <div class="shead"><h2>数据链路</h2><span class="tagline">浏览器直取官方源必被 CORS 拦，代理只解决可达性不解决跨域</span><div class="rule"></div></div>
+    <div class="panel">
+      <div class="formula">页面 → 同源服务 <b id="origin">http://127.0.0.1:8888</b> /api/{liquidity,crash,allocation}/* →（出口代理取服务端 config.ini 的 [proxy]，当前生效值见上方<b>系统资源 · 出口代理</b>一行）→ FRED / 美国财政部 / Yahoo / CNN / CNBC / multpl / GuruFocus / ccxt 行情源<br>上游分两条串行队列（官方数据 / 行情源），TTL 缓存 + 并发 single-flight；运行时参数一律 <b>环境变量 &gt; config.ini &gt; 代码默认</b></div>
+      <div class="note">未启动本地服务时本页与子页面的实时区全部显示失败标注——启动方法见项目根 <span class="num">start_app.bat</span> 或 <span class="num">python main.py --open</span>。</div>
+    </div>
+  </section>
+
+</div>
+
+<div class="toast" id="toast" hidden role="status" aria-live="polite"><span id="toast-msg"></span><button class="rf" id="toast-more" type="button" hidden>看输出</button><button class="rf" id="toast-x" type="button" title="关闭">✕</button></div>
+
+<footer>
+  <p>公共样式与脚本：<span class="num">staic/common.css · staic/common.js</span>（三子页面与本页共享）。模块代码与约定见 <span class="num">api/</span> 与 <span class="num">api/Liquidity/Qoder.md</span>。</p>
+</footer>
+
+<script src="staic/common.js"></script>
+<script>
+/* 主页只做健康探测与导航，不承载任何判级模型 */
+/* 持仓报告不设访问凭据（2026-09-22 用户定）：服务端只按 [report] daily_limit / us_daily_limit 分 kind 限每日次数 */
+const REPORTS = { crypto: '/api/allocation/report?kind=crypto',
+                  us: '/api/allocation/report?kind=us' };
+/* ---- 系统资源：/api/health 每探测周期现取；下面这张表除 RAM 用量外都是手工抄的快照 ----
+       百分比一律由 used/limit 现算，不再手填 —— 手填过一次就会和数字各说各话。 ---- */
+const HOST = {
+  at: '2026-09-23 06:40', src: 'devil user info',
+  rows: [
+    { k: '磁盘配额 Disk quota', used: '557.2M', limit: '3.0G' },
+    { k: '进程数 Processes', used: '7', limit: '20' },
+    { k: '内存 RAM memory', limit: '512.0M', live: 'rss_mb',
+      note: '上限 512 MB = serv00 官方配额；这一格的用量只算本服务这一个进程的峰值 RSS（/api/health 的 rss_mb，实时），不是账户总额也不是整机内存' },
+    { k: 'CPU', used: '0.0', limit: '100' },
+  ],
+};
+const toMB = s => {          // '557.2M' / '3.0G' / '7'（无量纲就按原值）→ 可比的数
+  const m = /^(-?[\d.]+)\s*([kmgtp]?)$/i.exec(String(s).trim());
+  if (!m) return NaN;
+  return parseFloat(m[1]) * ({ k: 1 / 1024, m: 1, g: 1024, t: 1024 * 1024, p: 1024 * 1024 * 1024 }[m[2].toLowerCase()] || 1);
+};
+const dt = iso => { const t = Date.parse(iso); return Number.isFinite(t) ? new Date(t)
+  .toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) : '—'; };
+const dur = s => { s = Math.max(0, Math.round(s)); const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
+  return d ? `${d} 天 ${h} 小时` : h ? `${h} 小时 ${m} 分` : `${m} 分 ${s % 60} 秒`; };
+function sysPaint(svc, gotAt) {
+  hostPaint(svc);          // RAM 那行的用量来自 /api/health，跟着探测周期一起刷
+  const base = e => ('base' in e.dataset ? e.dataset.base : (e.dataset.base = e.className));
+  const keys = ['s-mode', 's-pid', 's-boot', 's-up', 's-now', 's-skew', 's-rt', 's-mt', 's-stale',
+                's-cfg', 's-proxy', 's-fix', 's-log', 's-mods', 's-routes'];
+  const b = $('s-badge');
+  if (!svc) {
+    b.textContent = '○ 服务不可达'; b.className = 'cadb';
+    keys.forEach(k => { const e = $(k); e.textContent = '—'; e.className = base(e); e.title = ''; });
+    $('s-mod-rows').innerHTML = '<div class="note bad">取数服务未响应，本格无从自述。</div>';
+    return;
+  }
+  b.textContent = '● 实时'; b.className = 'cadb live';
+  const put = (k, txt, cls, tip) => {
+    const e = $(k);
+    e.textContent = txt; e.className = base(e) + (cls ? ' ' + cls : '');
+    if (tip != null) e.title = tip;
+  };
+  put('s-mode', svc.mode === 'public' ? 'public · 公网 Passenger' : 'local · 本机 ThreadingHTTPServer', svc.mode === 'public' ? 'warn' : 'ok');
+  put('s-pid', svc.pid == null ? '—' : String(svc.pid));
+  put('s-boot', dt(svc.booted));
+  const up = (Date.parse(svc.time) - Date.parse(svc.booted)) / 1000;
+  put('s-up', Number.isFinite(up) ? dur(up) : '—');
+  put('s-now', dt(svc.time));
+  const skew = gotAt - Date.parse(svc.time);
+  put('s-skew', Number.isFinite(skew)
+      ? (skew >= 0 ? '+' : '−') + Math.abs(skew / 1000).toFixed(1) + 's（含单程耗时）'
+      : '—', Math.abs(skew) > 5000 ? 'warn' : 'ok');
+  put('s-rt', svc.runtime || '—');
+  put('s-mt', dt(svc.code_mtime));
+  put('s-stale', svc.stale ? '⚠ 内存里的代码比盘上旧 —— touch tmp/restart.txt' : '✓ 一致', svc.stale ? 'bad' : 'ok');
+  put('s-cfg', svc.config_loaded ? '已加载' : '未找到 · 走内置默认', svc.config_loaded ? 'ok' : 'bad', svc.config || '');
+  put('s-proxy', svc.proxy || '(未配置)', svc.proxy && svc.proxy !== '(未配置)' ? 'ok' : 'bad');
+  put('s-fix', svc.show_fix === '1' ? '展示（子页修订记录可见）' : '隐藏', svc.show_fix === '1' ? 'ok' : 'warn');
+  put('s-log', String(svc.log_dir || '').split(/[\\/]/).slice(-2).join('/') || '—', '', svc.log_dir || '');
+  const mods = svc.modules || [], rt = svc.routes || {};
+  put('s-mods', `${mods.length} 个 · ${mods.join('/')}`);
+  const tot = mods.reduce((a, m) => a + ((rt[m] || []).length), 0);
+  put('s-routes', `${tot} 个`);
+  $('s-mod-rows').innerHTML = mods.map(m => {
+    const r = rt[m] || [];
+    return `<div class="kv"><span>${m}</span><b class="num" title="/api/${m}/{${r.join(',')}}">${r.length} 个 · ${r.join(' ')}</b></div>`;
+  }).join('');
+}
+function hostPaint(svc) {
+  const b = $('host-badge');
+  const live = !!(svc && svc.rss_mb != null);
+  if (b) { b.textContent = live ? '● 内存实时 · 余为快照' : '○ 写死快照'; b.className = 'cadb' + (live ? ' live' : ''); }
+  $('host-ph').innerHTML = `来源 <span class="num">${HOST.src}</span> · 抄录于 <span class="num">${HOST.at}</span> · ` +
+    `共 <span class="num">${HOST.rows.length}</span> 项 · 百分比按 used/limit 现算 · 带 <span class="num">实时</span> 的行现取自 <span class="num">/api/health</span>`;
+  $('host-rows').innerHTML = HOST.rows.map(r => {
+    let used = r.used, tag = '';
+    if (r.live) {
+      const v = svc && svc[r.live];
+      used = v == null ? null : v + 'M';
+      if (used != null) tag = ' <span class="num" style="color:var(--green)">实时</span>';
+    }
+    const u = toMB(used), l = toMB(r.limit);
+    const pct = Number.isFinite(u) && Number.isFinite(l) && l > 0 ? u / l * 100 : NaN;
+    const c = pct >= 90 ? 'var(--red)' : pct >= 70 ? 'var(--amber)' : 'var(--green)';
+    const w = Math.max(0, Math.min(pct || 0, 100)).toFixed(2);
+    const tip = (r.note ? r.note + ' · ' : '') + `上限 ${r.limit}` + (used == null ? ' · 用量未取到' : ` · 用量 ${used}`) +
+                (pct > 100 ? ' · 已超上限，条形封顶显示' : '');
+    const val = used == null ? '—（服务没上报，页面不猜）'
+      : (Number.isFinite(pct) ? pct.toFixed(2) + '%' : '—') + `（${used} / ${r.limit}）` + (pct > 100 ? ' ← 超上限，条形封顶、数字照抄' : '');
+    return `<div class="hb${Number.isFinite(pct) && pct < 90 ? ' ok' : ''}"><i>${r.k}${tag}</i>` +
+      `<span class="track"><b style="width:${Number.isFinite(pct) ? w : 0}%;background:${c}"></b></span>` +
+      `<u title="${tip.replace(/"/g, '&quot;')}">${val}</u></div>`;
+  }).join('');
+}
+hostPaint(null);
+
+/* ---- BTC 数据监控：与流动性页共用 /api/liquidity/btc 的服务端缓存（TTL 45s）。
+        均线位置沿用流动性页同一套公开口径：现价同时高于 MA120 与 MA200 = 站上双均线，
+        低于 MA200 = 破 MA200，其余为破 MA120 未破 MA200。取值时龄 > 120s 只标「快照」。---- */
+const BTC_MAX_AGE = 120;
+let BTCJ = null;
+function btcPaint() {
+  const j = BTCJ || {}, ok = !!j.ok;
+  const st = $('st-btc');
+  if (st) { st.textContent = ok ? '● 在线' : '○ 取数失败'; st.className = 'st ' + (ok ? 'ok' : 'bad'); }
+  const t = j.cached_at ? Date.parse(j.cached_at) : NaN;
+  const age = Number.isFinite(t) ? Math.max(0, Math.round((Date.now() - t) / 1000)) : null;
+  const live = ok && age != null && age <= BTC_MAX_AGE;
+  const clock = Number.isFinite(t) ? new Date(t).toLocaleTimeString('zh-CN', { hour12: false }) : '';
+  $('btc-badge').innerHTML = ok
+    ? `<span class="cadb${live ? ' live' : ''}" style="margin-top:0">${live ? '● 实时' : '○ 快照'} ${clock}${live ? '' : '（' + (age == null ? '时龄未知' : age + 's 前') + '）'}</span>`
+    : '<span class="cadb" style="margin-top:0;color:var(--red)">○ 取数失败</span>';
+  const blank = ['btc-ma120', 'btc-ma200', 'btc-perf', 'btc-hist', 'btc-used', 'btc-dropped', 'btc-card-px'];
+  if (!ok) {
+    $('btc-pos').textContent = '经本地服务取数失败 —— 不以滞后值顶替，本区块无读数';
+    $('btc-spot').textContent = '—';
+    blank.forEach(k => { $(k).textContent = '—'; });
+    $('btc-spark').innerHTML = '';
+    const nt = $('btc-note'); nt.hidden = false; nt.className = 'note bad'; nt.innerHTML = oneLine(j.error || '未知原因');
+    return;
+  }
+  const v120 = j.ma120 ? (j.spot / j.ma120 - 1) * 100 : null;
+  const v200 = j.ma200 ? (j.spot / j.ma200 - 1) * 100 : null;
+  const dev = (m, v) => m == null ? '日线不足，无法核验'
+    : `${nfd(m, 0)}（<b style="color:${v > 0 ? 'var(--green)' : 'var(--red)'}">${pc(v, 1)}</b>）`;
+  const pos = v200 == null ? '均线不可核验'
+    : (v200 > 0 && v120 > 0 ? '站上双均线' : v200 < 0 ? '跌破 MA200' : '破 MA120，未破 MA200');
+  const r = v200 == null ? 'md' : (v200 > 0 && v120 > 0 ? 'lo' : v200 < 0 ? 'hi' : 'md');
+  $('btc-pos').innerHTML = `均线位置 <b style="color:${riskColor(r)}">${pos}</b> · 服务端取值 ${clock}`;
+  $('btc-spot').innerHTML = `$${nfd(Math.round(j.spot), 0)}<u>${j.n || 0} 家中位</u>`;
+  $('btc-ma120').innerHTML = dev(j.ma120, v120);
+  $('btc-ma200').innerHTML = dev(j.ma200, v200);
+  const f = (v, d) => v == null ? '—' : `${pc(v, 2)}（基准 ${md(d)}）`;
+  $('btc-perf').textContent = j.perf_m == null && j.perf_q == null ? '日线历史不足，无法计算'
+    : f(j.perf_m, j.perf_m_d) + ' / ' + f(j.perf_q, j.perf_q_d);
+  const cl = j.closes || [];
+  $('btc-hist').textContent = `${cl.length} 根收盘 · 日线取自 ${j.histFrom || '—'}（可用 ${j.bars || 0} 根）`;
+  $('btc-spark').innerHTML = spark(cl, riskColor(r));
+  $('btc-used').textContent = `${j.n || 0} 家 · ` + ((j.used || []).join(', ') || '—');
+  const dp = j.dropped || [];
+  $('btc-dropped').textContent = dp.length ? `${dp.length} 家 · ` + dp.join(' · ') : '无';
+  $('btc-card-px').textContent = '$' + nfd(Math.round(j.spot), 0);
+  const nt = $('btc-note'), msg = [];
+  nt.className = 'note';
+  if (dp.length) msg.push(`已剔除 ${dp.length} 家行情源：<b>${dp.map(oneLine).join('；')}</b>`);
+  if (j.histErr) msg.push(`日线：${oneLine(j.histErr)}`);
+  if (age != null && age > BTC_MAX_AGE) msg.push(`服务端缓存在 ${age}s 前写入，本区读数为快照`);
+  nt.hidden = !msg.length; nt.innerHTML = msg.join(' · ');
+}
+function oneLine(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); }
+async function syncBtc() {
+  try { BTCJ = await jget('/api/liquidity/btc', 60000); }
+  catch (e) { BTCJ = { ok: false, error: String(e.message || e) }; }
+  btcPaint();
+}
+async function probe() {
+  let svc = null, gotAt = Date.now();
+  try { svc = await jget('/api/health', 4000); gotAt = Date.now(); } catch (e) { svc = null; }
+  sysPaint(svc, gotAt);
+  const bad = svc && (svc.stale || !svc.config_loaded || !svc.proxy || svc.proxy === '(未配置)');
+  $('svc').innerHTML = svc
+    ? `服务 <b>在线</b> · ${(svc.modules || []).length} 模块 · ${(svc.modules || []).reduce((n, m) => n + ((svc.routes || {})[m] || []).length, 0)} 端点 · 详情见下方<b>系统资源</b>${bad ? ' · <b style="color:var(--amber)">有需留意的项</b>' : ''}`
+    : `本地服务 <b style="color:var(--red)">不可达</b> —— 子页面实时取数将全部失败。请在项目根运行 <b>python main.py --open</b>（端口取 <b>config.ini</b> 的 <b>[server] port</b>，当前为 8888）。`;
+  await Promise.all([
+    ...['liquidity', 'crash', 'allocation'].map(async m => {
+      const el = $('st-' + m);
+      try {
+        const j = await jget('/api/' + m + '/health', 4000);
+        el.textContent = j.ok ? '● 在线' : '○ 异常';
+        el.className = 'st ' + (j.ok ? 'ok' : 'bad');
+        if (m === 'allocation') setQuota(j.report_quota);
+      } catch (e) { el.textContent = '○ 不可达'; el.className = 'st bad'; }
+    }),
+    syncBtc(),
+  ]);
+  $('asof').textContent = '探测于 ' + new Date().toLocaleTimeString('zh-CN', { hour12: false });
+}
+$('rf').addEventListener('click', probe);
+Board.nav('tabs');
+if (location.protocol.startsWith("http")) $('origin').textContent = location.origin;  // 本机/公网两套入口都显示真实来源
+probe();
+Board.autoSync(probe, 60000);
+
+/* ---- 持仓报告：两个 kind 都由服务端运行 cryptoTrader 对应的报表脚本（无参数运行即推送 TG，点一次发一条）。
+        成功只在右下角弹一句「已发送」，3 秒自动消失，不再往页面里铺一大块脚本输出；报表正文要点「查看报表」才展开。
+        失败弹的是不自动消失的红框（要留时间看清并点「看输出」）。次数上限各自计数（加密 3/天、美股 2/天），见 config.ini [report]。---- */
+const RPT = { crypto: { nm: '加密', tip: '服务端读单 + 逐单拉币价，最长约 3 分钟' },
+              us: { nm: 'US股', tip: '服务端读美股 CSV 汇总 + 推送，通常十几秒' } };
+const rptMsg = {};
+const rptCache = {};
+let quota = null, rptRunning = false;
+function rptPaint() { $('rpt-msg').innerHTML = Object.values(rptMsg).join(' · '); }
+rptPaint.n = 0;
+function setQuota(q) {                 // 服务端 data/report_quota.json 说了算，页面只是照抄
+  if (q) quota = q;
+  if (!quota) return;
+  const kinds = quota.kinds || {};
+  for (const k of ['crypto', 'us']) {
+    const b = $('rpt-' + k), kq = kinds[k];
+    if (!b) continue;
+    if (!kq) { b.disabled = rptRunning; b.title = ''; continue; }   // 服务端没上报这一项：不猜额度
+    b.disabled = rptRunning || kq.left <= 0;
+    b.title = kq.left ? `今天已发送 ${kq.used}/${kq.limit} 次（${quota.date}）`
+                      : `今天已发送 ${kq.limit} 次了，明天再来（${quota.date}）`;
+  }
+}
+function rptLink(txt, label) {
+  const id = 'rpt-' + (++rptPaint.n);
+  rptCache[id] = txt;
+  return `<a href="javascript:void 0" style="color:var(--gold)" data-rpt="${id}">${label} →</a>`;
+}
+function getReport(kind, btn) {
+  const nm = (RPT[kind] || {}).nm || kind;
+  rptMsg[kind] = `<b style="color:var(--amber)">${nm}报告</b> 运行中…（${(RPT[kind] || {}).tip || '服务端跑脚本'}）`; rptPaint();
+  rptRunning = true; btn.disabled = true;
+  const c = new AbortController(), tid = setTimeout(() => c.abort(), 200000);
+  fetch(REPORTS[kind], { signal: c.signal, cache: 'no-store' })
+    .then(r => r.json()).then(j => {
+      setQuota(j.quota);
+      if (j.ok) {
+        rptMsg[kind] = `<b style="color:var(--green)">${nm}报告</b> 已发送${j.sec ? ' · ' + j.sec + 's' : ''} · ` +
+          rptLink(j.stdout || '（脚本无输出）', '查看报表');
+        toast(`${nm}持仓报告已发送 · 报表已推送到 Telegram${j.sec ? ' · ' + j.sec + 's' : ''}`);
+      } else {
+        rptMsg[kind] = `<b style="color:var(--red)">${nm}报告</b> ${j.error || '运行失败'}` +
+          (j.stdout ? ' · ' + rptLink(j.stdout, '看输出') : '');
+        toast(`${nm}报告失败：${j.error || '运行失败'}`, { err: true, sticky: true,
+          more: j.stdout ? () => showReport(j.stdout) : null });
+      }
+    }).catch(e => {
+      const why = e.name === 'AbortError' ? '超时（>200s）已中断等待，服务端报表进程结束后会自行收尾' : (e.message || e);
+      rptMsg[kind] = `<b style="color:var(--red)">${nm}报告</b> ` + why;
+      toast(`${nm}报告失败：${why}`, { err: true, sticky: true });
+    }).finally(() => { rptRunning = false; rptPaint(); setQuota(); clearTimeout(tid); });
+}
+let toastTimer = null, toastMore = null;
+function toast(msg, o) {
+  clearTimeout(toastTimer);
+  $('toast-msg').textContent = msg;          // 只走 textContent：脚本输出不许当 HTML 塞进来
+  toastMore = (o && o.more) || null;
+  $('toast-more').hidden = !toastMore;
+  const t = $('toast');
+  t.classList.toggle('err', !!(o && o.err));
+  t.hidden = false;
+  if (!(o && o.sticky)) toastTimer = setTimeout(() => { t.hidden = true; }, (o && o.ms) || 3000);
+}
+$('toast-more').addEventListener('click', () => { if (toastMore) { $('toast').hidden = true; toastMore(); } });
+$('toast-x').addEventListener('click', () => { clearTimeout(toastTimer); $('toast').hidden = true; });
+function showReport(text) {
+  const p = $('rpt-panel');
+  $('rpt-body').textContent = text;
+  p.hidden = false;
+  p.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+$('rpt-msg').addEventListener('click', e => {
+  const id = e.target && e.target.getAttribute && e.target.getAttribute('data-rpt');
+  if (id && rptCache[id] != null) showReport(rptCache[id]);
+});
+$('rpt-close').addEventListener('click', () => { $('rpt-panel').hidden = true; });
+$('rpt-crypto').addEventListener('click', () => getReport('crypto', $('rpt-crypto')));
+$('rpt-us').addEventListener('click', () => getReport('us', $('rpt-us')));
+</script>
+</body>
+</html>
