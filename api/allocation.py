@@ -28,6 +28,7 @@ from datetime import date
 from core import (ROOT, cached, downsample, fred_series, gov_lock, log, sma,
                   yahoo_bars)
 import liquidity
+import db
 
 ASSET_TTL = 600
 ASSETS = {          # 白名单：Yahoo 符号 -> 中文名（日志用）。绝不允许任意 URL / 任意符号转发。
@@ -133,16 +134,16 @@ def r_macro(q):
 # 解释器/脚本按 OS 选，config.ini [report] 可覆盖；环境（含 HTTPS_PROXY）原样继承给子进程，
 # 脚本自己的代理开关在 cryptoTrader/config/config.ini 的 [proxy] 段。
 # ⚠ 两个脚本都是**无参数运行即推送 Telegram**（`--DD` 才是只发钉钉），所以点一次 = 发一条。
-REPORT = {          # kind -> 默认脚本（Windows 用正斜杠即可，os.path 与 subprocess 都认）/ 上限键
+REPORT = {          # kind -> 默认脚本（下标 0 = Windows，1 = Linux/FreeBSD；Windows 用正斜杠即可，os.path 与 subprocess 都认）/ 上限键
     "crypto": {
         "name": "加密持仓",
-        "script": ("D:/runningOrder.py",
+        "script": ("./runningOrder.py",
                    "./runningOrder.py"),
         "script_env": "REPORT_CRYPTO_SCRIPT", "limit_env": "REPORT_DAILY_LIMIT", "limit": 3,
     },
     "us": {
         "name": "美股持仓",
-        "script": ("D:/runningStorcksOrder.py",
+        "script": ("./runningStorcksOrder.py",
                    "./runningStorcksOrder.py"),
         "script_env": "REPORT_US_SCRIPT", "limit_env": "REPORT_US_DAILY_LIMIT", "limit": 2,
     },
@@ -248,6 +249,11 @@ def r_report(q):
         return 429, {"ok": False, "kind": kind, "quota": q,
                      "error": "今天已发送 %d 次了，明天再来" % kq["limit"]}
     ok, d = run_report(kind)
+    # 留痕一行：只记元数据（kind / 成败 / 耗时 / 字符数 / 当天第几次），**报表正文不落库**——
+    # 正文里是持仓明细与金额，而这套库与账号是共享环境。store_report 内部吞异常，不影响这次返回。
+    db.store_report(kind, ok, sec=d.get("sec") or 0, chars=len(d.get("stdout") or ""),
+                    quota_used=(q["kinds"][kind]["limit"] - _quota()["kinds"][kind]["left"]),
+                    err=d.get("error") or "")
     return (200 if ok else 502), {"ok": ok, "kind": kind, "quota": _quota(), **d}
 
 

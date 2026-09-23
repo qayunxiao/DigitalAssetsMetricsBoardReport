@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BTC 指标监控 · 12 项日线指标</title>
+<meta name="description" content="恐慌贪婪指数与 AHR999、CBBI、CVDD、EMA、EMA_new、KDJ、Look Into Bitcoin、MACD、MVRV、NUPL、SOPR Z-Score 的日线读数面板：数值、判定、迷你历史与上游来源时龄。口径抄自 cryptoTrader 的各 handle_*.py，取不到的项一律标缺口，不补估算值。">
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="common.css">
+<script>try{document.documentElement.dataset.theme=localStorage.getItem("board-theme")||"dark"}catch(e){}</script>
+<style>
+  /* 本页特有版式：12 张指标卡 + 口径表 */
+  .icard{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:15px 16px 13px;position:relative}
+  .icard:hover{border-color:var(--line2)}
+  .icard.t-red{border-color:rgba(242,85,90,.45)}
+  .icard.t-green{border-color:rgba(74,222,128,.4)}
+  .icard.t-bad{border-style:dashed}
+  .icard .hd{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:9px}
+  .icard .nm{font-size:13px;font-weight:600}
+  .icard .unit{font-family:var(--mono);font-size:10px;color:var(--tx3)}
+  .icard .st{font-family:var(--mono);font-size:9.5px;color:var(--tx3);border:1px solid var(--line);
+             border-radius:4px;padding:0 4px;cursor:default}   /* 「入库」标：这张卡的数据会不会写进 MySQL */
+  .icard .rt{margin-left:auto}
+  .vb{display:inline-block;font-size:11px;line-height:1.5;padding:2px 8px;border-radius:5px;margin-top:2px;
+      border:1px solid var(--line2);color:var(--tx2);background:var(--bg3)}
+  .vb.red{color:var(--red);border-color:rgba(242,85,90,.4);background:rgba(242,85,90,.09)}
+  .vb.green{color:var(--green);border-color:rgba(74,222,128,.36);background:rgba(74,222,128,.08)}
+  .vb.bad{color:var(--red);border-color:rgba(242,85,90,.5);background:rgba(242,85,90,.06);white-space:normal}
+  .icard .meta{font-size:10.5px;color:var(--tx3);font-family:var(--mono);margin-top:9px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .icard .meta .rf{font-size:10.5px;padding:2px 7px}
+  details.det{margin-top:9px;border-top:1px dashed var(--line);padding-top:8px}
+  details.det summary{cursor:pointer;font-size:11px;color:var(--tx3);font-family:var(--mono);list-style:none}
+  details.det summary::before{content:"▸ ";color:var(--tx3)}
+  details.det[open] summary::before{content:"▾ "}
+  details.det .arow{display:flex;justify-content:space-between;gap:10px;font-size:11.5px;color:var(--tx2);padding:3px 0}
+  details.det .arow b{font-family:var(--mono);font-weight:600;color:var(--tx);text-align:right;word-break:break-all}
+  details.det .fnote{font-size:11px;color:var(--tx3);margin-top:7px;line-height:1.65}
+  .rule-tbl .kv{font-size:12.5px}
+  .rule-tbl .kv i{font-style:normal;color:var(--tx2)}
+  .rule-tbl .kv b{text-align:right;font-weight:400;color:var(--tx);font-family:var(--mono);font-size:11.5px;max-width:62%}
+  .gaplist li{font-size:12.5px;color:var(--tx2);line-height:1.85;margin-bottom:7px;list-style:none;
+    padding-left:15px;position:relative}
+  .gaplist li::before{content:"×";position:absolute;left:0;color:var(--red)}
+  .gaplist li b{color:var(--tx)}
+
+  /* 双击放大：整屏遮罩 + 居中弹层，画的是这张卡自己的 hist 序列 */
+  .icard{cursor:zoom-in}
+  .icard summary,.icard .rf{cursor:pointer}
+  .icard .rt{display:flex;gap:6px}
+  .icard .rt .rf{font-size:10.5px;padding:2px 7px}   /* 两张并排的小按钮，别把最窄卡片的标题行挤换行 */
+  .zmask{position:fixed;inset:0;z-index:200;background:rgba(6,6,7,.74);backdrop-filter:blur(4px);
+         display:flex;align-items:center;justify-content:center;padding:22px}
+  .zmask[hidden]{display:none}
+  .zbox{background:var(--panel);border:1px solid var(--line2);border-radius:12px;width:min(1024px,100%);
+        max-height:calc(100vh - 44px);overflow:auto;padding:20px 22px 18px;box-shadow:0 18px 60px rgba(0,0,0,.55)}
+  .zhd{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px}
+  .zhd .nm{font-size:16px;font-weight:600}
+  .zhd .unit{font-family:var(--mono);font-size:11px;color:var(--tx3)}
+  .zhd .rf{margin-left:auto}
+  .zval{font-family:var(--mono);font-size:38px;font-weight:600;letter-spacing:-.03em;line-height:1.15}
+  .zchart{margin-top:14px;background:var(--inset);border:1px solid var(--line);border-radius:8px;padding:10px 8px 4px;position:relative}
+  .zempty{padding:36px 14px;text-align:center;font-size:12.5px;color:var(--tx3);line-height:1.8}
+  /* 悬浮读数：十字线画在 svg 内（跟着 viewBox 缩放），气泡是叠在图上的 HTML，定位靠 getBoundingClientRect 换算 */
+  #z-chart .chart{cursor:crosshair}
+  .ztip{position:absolute;z-index:2;display:none;transform:translateX(-50%);white-space:nowrap;pointer-events:none;
+        font-family:var(--mono);font-size:11.5px;color:var(--tx);background:var(--bg3);border:1px solid var(--line2);
+        border-radius:5px;padding:3px 8px;box-shadow:0 4px 14px rgba(0,0,0,.35)}
+  .ztip.on{display:block}
+  .zmeta{margin-top:2px}
+  .zmeta .cadb{margin-top:10px}
+  .zdet{display:grid;grid-template-columns:repeat(auto-fit,minmax(228px,1fr));gap:0 22px;margin-top:12px}
+  .zdet .kv b{font-family:var(--mono);font-weight:600;color:var(--tx);text-align:right;word-break:break-all}
+  .zfoot{font-size:11.5px;color:var(--tx3);margin-top:14px;padding-top:10px;border-top:1px dashed var(--line);line-height:1.75}
+  .zfoot b{color:var(--tx2)}
+  @media (max-width:640px){.zval{font-size:30px}.zdet{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="bar">
+    <div class="brand"><b><a href="../Index.html">Lattice</a></b><span>BTC Metrics Desk</span></div>
+    <nav class="tabs" id="tabs" aria-label="看板导航"></nav>
+    <div class="asof num" id="asof"></div>
+    <div class="lbar"><button class="rf" id="rf" type="button">↻ 刷新</button><button class="rf" id="rff" type="button" title="跳过服务端缓存，直接打上游重取这 12 项">⤳ 穿透缓存重取</button><span class="ls" id="livestat">取数中…</span></div>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <section id="top">
+    <div class="shead"><h2>本轮取数</h2><span class="tagline">12 项一次汇总（<span class="num">/api/btc/summary</span>）· 每项各自缓存、互不牵连：一个源挂了只有那一张卡变虚线框</span><div class="rule"></div></div>
+    <div class="duo">
+      <div class="panel">
+        <h3>现价与日线<span class="cadb" id="top-badge" style="margin-top:0">○ 待取数</span></h3>
+        <div class="ph">EMA / KDJ / MACD / CVDD 比对共用这一串已收盘日线；当天未收盘那根服务端已剔除</div>
+        <div class="val num" id="top-spot">—</div>
+        <div style="margin-top:12px">
+          <div class="kv"><span>日线源</span><b class="num" id="top-from">—</b></div>
+          <div class="kv"><span>最后一根已收盘</span><b class="num" id="top-asof">—</b></div>
+          <div class="kv"><span>本轮有数 / 缺位</span><b class="num" id="top-count">—</b></div>
+          <div class="kv"><span>缺位指标</span><b class="num" id="top-failed">—</b></div>
+        </div>
+      </div>
+      <div class="panel">
+        <h3>怎么读这张页</h3>
+        <div class="ph">判定颜色只有三种含义，不掺综合评分</div>
+        <div class="kv"><span><b style="color:var(--green)">绿</b> · 底部/多头</span><b>低估区、金叉、抄底窗口</b></div>
+        <div class="kv"><span><b style="color:var(--red)">红</b> · 顶部/空头</span><b>过热区、死叉、减仓窗口</b></div>
+        <div class="kv"><span><b style="color:var(--tx2)">灰</b> · 中性</span><b>落在两档之间，或上游未给阈值</b></div>
+        <div class="note">卡片的<b>大数字是上游原值或本页按上游序列现算的结果</b>，点开「明细」看公式、参数与近 365 天分位；取不到数的卡片一律写原因，不拿旧值或估算值冒充当前读数。阈值口径全部来自 <span class="num">api/Crypto/handle_*.py</span>（cryptoTrader 的仓库内副本），出处行号标在下方「口径与阈值」。</div>
+      </div>
+    </div>
+  </section>
+
+  <section id="cards" style="margin-top:26px">
+    <div class="shead"><h2>12 项日线指标</h2><span class="tagline">顺序与 <span class="num">api/btc.py</span> 的 INDICATORS 表一致 · 放大：点每张卡右上角的<b>「⤢ 放大」</b>或直接<b>双击卡片任意位置</b>，放大图上悬浮任意点看该点日期与数值（键盘：卡片聚焦后 Enter，Esc 收起）</span><div class="rule"></div></div>
+    <div class="grid" id="grid"><div class="ph" style="font-size:12px;color:var(--tx3)">等待首轮取数…</div></div>
+  </section>
+
+  <section id="rules" style="margin-top:30px">
+    <div class="shead"><h2>口径与阈值</h2><span class="tagline">「上游」列 = <span class="num">api/Crypto/handle_*.py</span> 里的行号（cryptoTrader 同名文件的仓库内副本，逐字节一致；阈值表 <span class="num">operationConfig.py</span> 那份没抄进来，仍在 <span class="num">D:/Qorder_ws/cryptoTrader/utils/</span> 只读）；本页只是把它重写成零依赖版，没改判级数字</span><div class="rule"></div></div>
+    <div class="panel rule-tbl" id="rules-body"></div>
+  </section>
+
+  <section id="gaps" style="margin-top:26px">
+    <div class="shead"><h2>已知缺口（宁缺毋假）</h2><span class="tagline">2026-09-23 实测上游状态；这几项本页<b>不给数也不估</b></span><div class="rule"></div></div>
+    <div class="panel">
+      <ul class="gaplist" style="margin:0;padding:0">
+        <li><b>AHR999</b>：三个上游现在全不通（2026-09-23 逐条实测）—— <b>coinsoto</b>（<span class="num">handle_AHR999.py</span> 用的就是这个表）走代理时 TLS 握手即被断开、换直连则 20s 超时，<span class="num">api.coinsoto.com</span> 与 <span class="num">coinsoto.com/api</span> 两条变体同样不通；<b>soulbab</b> 回 530，正文是 Cloudflare 1016「源站 DNS 解析不到」，域名已经不存在了；<b>CoinGlass</b> 的 <span class="num">/api/index/ahr999</span> 端点确实存在、鉴权头 <span class="num">CG-API-KEY</span> 也认这个 Key，但回 <span class="num">Upgrade plan</span>——免费套餐不含该指标。同一把 Key 在 CryptoQuant 上也是整体 403（连 hash-rate 都要 Professional 档），站内 <span class="num">capi.coinglass.com</span> 对任何路径都回一句空 <span class="num">success</span>，looknode 没有 <span class="num">/api/ahr999</span>。本模块<b>不自己造 AHR999 公式</b>（<span class="num">api/Crypto/handle_AHR999.py</span> 里也没有可核对的口径——它只是一句 <span class="num">requests.get</span> 取现成表格，从没算过），拍脑袋算出来会被当成抄底/逃顶信号，所以这张卡宁可空着。哪天 CoinGlass 套餐升上来、环境里设了 <span class="num">COINGLASS_KEY</span>，这条 Key 版路径就会自动出数（仓库、config.ini、上传包里都不放密钥）。</li>
+        <li><b>Look Into Bitcoin 盈利币占比</b>：<span class="num">production.lookintobitcoin.com</span> 自 2024 年起 502 废弃（见 <span class="num">api/Crypto/handle_LookIntoBitcoin.py</span> 与 <span class="num">cryptoTrader/docs/api_url:141-145</span>），本机出口现在连域名都被代理直接拒掉；替代是 BM Pro 付费订阅。这一格保留着，通不通全看它有没有临时恢复。</li>
+        <li><b>SOPR Z-Score</b>：口径是「对可用的 Z 分量取均值」，而 <span class="num">charts.bitbo.io</span> 的 <span class="num">mvrv-z</span> 与 <span class="num">sopr</span> 两个接口现在都回 401，只剩 <span class="num">nupl_z</span>（由 Looknode MVRV 现算）这一个分量。所以现在这格 ≈ nupl_z，与名字里的 SOPR 已经脱钩——卡片明细里按分量构成如实标注，不改名也不补数。</li>
+        <li><b>CBBI 合成分</b>：由上游服务端算（9 个子指标等权），本页只做 0~1 → 0~100 的换算，<b>不重算合成分</b>；9 个子指标的最新读数列在明细里，可以自己核对。</li>
+        <li><b>日线源</b>：本机出口对 Binance 是 451（地区封锁）、Bybit 403，所以实际会落在 Kraken / OKX / Coinbase 上；三家日线的切分时刻不完全一致（OKX 按 UTC+8），跨源比较时看卡片上的「日线源」一行。</li>
+        <li><b>MVRV 顶部阈值</b>：cryptoTrader 只配了底部那一档（<span class="num">mvrv_max=[0.95,1.0]</span>），顶部那档没有口径，本页就不编一个数字出来。</li>
+      </ul>
+    </div>
+  </section>
+
+  <section id="links" style="margin-top:26px">
+    <div class="shead"><h2>上游清单</h2><span class="tagline">全部公开只读 GET、无密钥；经服务端（含 config.ini 的 [proxy]）中转，浏览器不直取</span><div class="rule"></div></div>
+    <div class="panel">
+      <div class="srcs">
+        <a href="https://api.alternative.me/fng/?limit=400" target="_blank" rel="noreferrer">alternative.me · 恐慌贪婪指数</a>
+        <a href="https://colintalkscrypto.com/cbbi/data/latest.json" target="_blank" rel="noreferrer">colintalkscrypto.com · CBBI latest.json</a>
+        <a href="https://www.looknode.com/api/mCapRealizedRatio" target="_blank" rel="noreferrer">looknode.com · MVRV（NUPL 由它推算）</a>
+        <a href="https://www.looknode.com/api/CVDD" target="_blank" rel="noreferrer">looknode.com · CVDD</a>
+        <a href="https://api.kraken.com/0/public/OHLC?pair=XBTUSD&amp;interval=1440" target="_blank" rel="noreferrer">Kraken OHLC · 日线（721 根）</a>
+        <a href="https://www.okx.com/api/v5/market/candles?instId=BTC-USDT&amp;bar=1D&amp;limit=300" target="_blank" rel="noreferrer">OKX candles · 日线</a>
+        <a href="https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=86400" target="_blank" rel="noreferrer">Coinbase candles · 日线</a>
+        <a href="https://api.binance.com/api/v3/klines?symbol=BTCUSDT&amp;interval=1d&amp;limit=500" target="_blank" rel="noreferrer">Binance klines · 首选（本机 451）</a>
+        <a href="https://coinsoto.com/indicatorapi/getAhr999Table" target="_blank" rel="noreferrer">coinsoto · AHR999 表（当前不可达）</a>
+        <a href="https://docs.coinglass.com/v4.0-zh/reference/ahr999" target="_blank" rel="noreferrer">CoinGlass · AHR999（端点在，套餐不含）</a>
+        <a href="https://charts.bitbo.io/api/v1/mvrv-z/?latest=true" target="_blank" rel="noreferrer">charts.bitbo.io · MVRV Z（当前 401）</a>
+        <a href="https://production.lookintobitcoin.com/api/supply-in-profit" target="_blank" rel="noreferrer">lookintobitcoin · 盈利币占比（已废弃）</a>
+        <a href="../Index.html">← 回看板主页</a>
+      </div>
+      <div class="note">同源中转链路：本页 → <span class="num">/api/btc/summary</span> →（出口代理取 <span class="num">config.ini [proxy]</span>）→ 上述上游。服务没起来时整页显示不可达，不会留半截旧数在页面上。</div>
+      <div class="note">入库（可选旁路，卡片上的 <span class="num">⌗ 入库</span> 标就是这件事）：12 项日读数一律写 <span class="num">board_indicator_daily</span>，<b>取数失败也写一行</b>（value 为空、error 记原因），带历史的卡再把整条序列写 <span class="num">board_series_daily</span>（键 <span class="num">btc:&lt;key&gt;</span>）；同日覆盖、值没变就不打库。开关与口令在 <span class="num">[mysql]</span>（优先 <span class="num">local.ini</span>／环境变量），建表 <span class="num">python api/db.py --init</span>，状态看 <span class="num">/api/db/health</span>；没装 pymysql 或库不通时这一路整体空转，页面照常有数。</div>
+    </div>
+  </section>
+
+</div>
+
+<!-- 双击放大弹层：内容全部来自这张卡在 /api/btc/summary 里的那一条 item，打开时不另发请求 -->
+<div class="zmask" id="zmask" role="dialog" aria-modal="true" aria-labelledby="z-title" hidden>
+  <div class="zbox">
+    <div class="zhd"><span class="nm" id="z-title"></span><span class="unit" id="z-unit"></span>
+      <button class="rf" id="z-close" type="button" title="关闭（Esc）">✕ 关闭</button></div>
+    <div class="zval num" id="z-val"></div>
+    <div id="z-vb"></div>
+    <div class="zchart" id="z-chart"></div>
+    <div class="zmeta" id="z-meta"></div>
+    <div class="zdet" id="z-det"></div>
+    <div class="zfoot" id="z-foot"></div>
+  </div>
+</div>
+
+<footer>
+  <p>取数与算法：<span class="num">api/btc.py</span>（注册为 <span class="num">/api/btc/*</span>）· 公共样式与脚本 <span class="num">common.css · common.js</span> · 口径出处 <span class="num">cryptoTrader/api_list/handle_*.py</span>。</p>
+</footer>
+
+<script src="common.js"></script>
+<script>
+/* 12 张卡片全部由 /api/btc/summary 的 items 驱动，页面不内置任何数值 */
+const TONE = { red: "red", green: "green", gray: "", bad: "bad" };
+let DATA = null, liveTimer = null;
+/* 上游错误文本会直接进 innerHTML（short_err 截断后仍可能带尖括号），一律先转义 */
+const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+function valOf(it) {
+  if (!it.ok) return '—';
+  if (it.text != null) return it.text;
+  if (it.value == null) return '—';
+  return nfd(it.value, it.dp == null ? 2 : it.dp);
+}
+function detOf(it) {
+  const rows = (it.extras || []).map(e => `<div class="arow"><i>${esc(e.k)}</i><b>${e.v == null ? '—' : esc(e.v)}</b></div>`).join('');
+  const note = it.note ? `<div class="fnote">${esc(it.note)}</div>` : '';
+  if (!rows && !note) return '';
+  return `<details class="det"><summary>明细 · 公式与分位（${(it.extras || []).length} 行）</summary>${rows}${note}</details>`;
+}
+function card(it) {
+  const tone = TONE[it.tone] || '';
+  const live = it.ok && it.asof && isToday(it.asof);
+  const badge = it.ok ? cadb(!!live, esc(it.src || ''), esc(it.asof || '')) : '';
+  const st = it.store ? `<span class="st" title="${it.store === 'daily+hist'
+    ? '入库：日读数进 board_indicator_daily，整条历史序列进 board_series_daily（键 btc:' + esc(it.key) + '）'
+    : '入库：日读数进 board_indicator_daily' + (it.ok ? '' : '（失败也写一行，error 记原因）')}">⌗ 入库</span>` : '';
+  return `<div class="icard t-${tone}" id="c-${esc(it.key)}" tabindex="0" title="双击放大 ${esc(it.name)} 的历史曲线">
+    <div class="hd"><span class="nm">${esc(it.name)}</span><span class="unit">${it.ok ? esc(it.unit || '') : '取数失败'}</span>${st}
+      <span class="rt"><button class="rf" data-zoom="1" type="button" title="放大这张卡的历史曲线（也可以直接双击卡片任意位置）">⤢ 放大</button><button class="rf" data-re="1" type="button">重试</button></span></div>
+    <div class="val num">${esc(valOf(it))}</div>
+    <div class="vb ${tone}">${esc(it.verdict || '')}</div>
+    ${it.ok ? spark((it.hist || []).map(h => h.v), riskOf(tone)) : ''}
+    ${badge ? `<div class="meta">${badge}</div>` : ''}
+    ${detOf(it)}
+  </div>`;
+}
+function riskOf(tone) { return tone === 'red' ? '#f2555a' : tone === 'green' ? '#4ade80' : '#d4af37'; }
+function isToday(d) { return d === new Date().toISOString().slice(0, 10); }
+
+/* ---- 双击放大：把这张卡自己的 hist 序列用公共 lineChart 画大，不另取数、不换口径 ---- */
+let ZKEY = null;
+function itemOf(key) { return ((DATA && DATA.items) || []).find(x => x.key === key); }
+
+function zoom(key) {
+  if (!itemOf(key)) return;
+  ZKEY = key;
+  $('zmask').hidden = false;
+  document.body.style.overflow = 'hidden';        // 遮罩打开时锁掉背后滚动
+  zPaint();
+  $('z-close').focus();
+}
+function closeZoom() {
+  if (!ZKEY) return;
+  const back = ZKEY;
+  ZKEY = null;
+  $('zmask').hidden = true;
+  document.body.style.overflow = '';
+  const c = $('c-' + back); if (c) c.focus();      // 焦点还给来源卡片
+}
+/* 放大图的纵轴：MVRV 这类倍数值在 2010 年那种早期点上有一个极端值（实测 45.9），
+   按全域画整条线会被压成一条平线。所以只有当 2%~98% 分位那一段不足全域 1/4 时才截断，
+   并在弹层里写清真实全域和跑到尺度外的点数 —— 数据一条没删，只是纵轴不再被单点绑架。 */
+function zoomDom(vals) {
+  const a = vals.filter(Number.isFinite).slice().sort((x, y) => x - y);
+  if (a.length < 4) return { dom: null, cut: null };
+  const q = p => a[Math.min(a.length - 1, Math.max(0, Math.round((a.length - 1) * p)))];
+  const lo = q(0.02), hi = q(0.98), soft = hi - lo, full = a[a.length - 1] - a[0];
+  if (!(soft > 0) || soft * 4 >= full) return { dom: null, cut: null };
+  const pad = soft * 0.15;
+  return { dom: [lo - pad, hi + pad],
+           cut: { out: vals.filter(v => v < lo - pad || v > hi + pad).length, min: a[0], max: a[a.length - 1] } };
+}
+
+/* 放大图的悬浮读数：横轴只有首/中/末三个标签，另外 120 多个点得靠鼠标定位 —— 找到 x 最近的那个点，
+   画十字线 + 高亮点，气泡报该点的日期与数值（触屏没 hover，点一下走同一条路）。
+   几何量在 zPaint 里存进 ZGEO，和那次 lineChart 渲染共用同一套（连纵轴 dom 都显式传过去，不让两边各算一份）。 */
+let ZGEO = null;
+const SVGNS = 'http://www.w3.org/2000/svg';
+
+function tipEl() {
+  const host = $('z-chart');
+  let t = document.getElementById('z-tip');
+  if (!t) { t = document.createElement('div'); t.id = 'z-tip'; t.className = 'ztip'; host.appendChild(t); }
+  return t;
+}
+function zHoverOff() {
+  const t = document.getElementById('z-tip'); if (t) t.classList.remove('on');
+  const svg = $('z-chart').querySelector('svg');
+  const g = svg && svg.querySelector('#z-cross'); if (g) g.style.display = 'none';
+}
+function zHover(e) {
+  const host = $('z-chart'), svg = host.querySelector('svg');
+  if (!svg || !ZGEO) return zHoverOff();
+  const sr = svg.getBoundingClientRect(), vb = svg.viewBox.baseVal;
+  if (!sr.width || !ZGEO.vals.length) return zHoverOff();
+  const ux = (e.clientX - sr.left) / sr.width * vb.width;          // 客户端像素 → viewBox 坐标
+  const st = (ZGEO.w - ZGEO.pad * 2) / (ZGEO.vals.length - 1);
+  const i = Math.max(0, Math.min(ZGEO.vals.length - 1, Math.round((ux - ZGEO.pad) / st)));
+  const x = ZGEO.pad + st * i, v = ZGEO.vals[i];
+  const y = ZGEO.h - ZGEO.pad - (v - ZGEO.dom[0]) / ((ZGEO.dom[1] - ZGEO.dom[0]) || 1) * (ZGEO.h - ZGEO.pad * 2);
+
+  let g = svg.querySelector('#z-cross'), ln, ci;
+  if (g) { ln = g.querySelector('line'); ci = g.querySelector('circle'); }
+  else {
+    g = document.createElementNS(SVGNS, 'g'); g.id = 'z-cross'; g.style.pointerEvents = 'none';
+    ln = document.createElementNS(SVGNS, 'line');
+    ln.setAttribute('y1', 0); ln.setAttribute('y2', ZGEO.h);
+    ln.setAttribute('stroke', T('--line2')); ln.setAttribute('stroke-width', 1);
+    ln.setAttribute('stroke-dasharray', '3 4'); ln.setAttribute('vector-effect', 'non-scaling-stroke');
+    ci = document.createElementNS(SVGNS, 'circle');
+    ci.setAttribute('r', 3.6); ci.setAttribute('fill', ZGEO.color);
+    ci.setAttribute('stroke', T('--inset')); ci.setAttribute('stroke-width', 1.5);
+    g.appendChild(ln); g.appendChild(ci); svg.appendChild(g);
+  }
+  g.style.display = '';
+  ln.setAttribute('x1', x); ln.setAttribute('x2', x);
+  ci.setAttribute('cx', x); ci.setAttribute('cy', y);
+
+  const tip = tipEl();
+  // 像 "0~100" 这种是刻度说明不是单位，拼在读数后面变成「71 0~100」很难看，只拼真单位（美元 / 倍）
+  tip.textContent = ZGEO.dates[i] + ' · ' + nfd(v, ZGEO.dp) + (ZGEO.unit && !ZGEO.unit.includes('~') ? ' ' + ZGEO.unit : '');
+  tip.classList.add('on');                   // 先显示再量尺寸：display:none 时 offsetWidth/Height 都是 0
+  const zr = host.getBoundingClientRect();
+  const ax = sr.left - zr.left + x / vb.width * sr.width;
+  const ay = sr.top - zr.top + y / vb.height * sr.height;
+  const tw = tip.offsetWidth, th = tip.offsetHeight;
+  // 落在截断尺度之外的点（MVRV 早期那个 45.92）会算出画框之外的 ay，气泡必须拉回框内，靠顶就翻到点下方
+  const above = ay - th - 12 >= 0;
+  tip.style.left = Math.max(tw / 2 + 2, Math.min(ax, zr.width - tw / 2 - 2)) + 'px';
+  tip.style.top = Math.max(2, Math.min(zr.height - th - 2, above ? ay - th - 12 : ay + 12)) + 'px';
+}
+
+function zPaint() {
+  const it = itemOf(ZKEY);
+  if (!it) { closeZoom(); return; }
+  const tone = TONE[it.tone] || '';
+  const pts = (it.hist || []).filter(x => Number.isFinite(x.v));
+  $('z-title').textContent = it.name;
+  $('z-unit').textContent = it.ok ? (it.unit || '') : '取数失败';
+  $('z-val').textContent = valOf(it);
+  $('z-vb').innerHTML = `<div class="vb ${tone}">${esc(it.verdict || '')}</div>`;
+  $('z-meta').innerHTML = it.ok ? cadb(!!(it.asof && isToday(it.asof)), esc(it.src || ''), esc(it.asof || '')) : '';
+  $('z-det').innerHTML = (it.extras || []).map(e =>
+    `<div class="kv"><i>${esc(e.k)}</i><b>${e.v == null ? '—' : esc(e.v)}</b></div>`).join('');
+  const host = $('z-chart');
+  let cutNote = '';
+  ZGEO = null;
+  if (pts.length >= 2) {
+    const vals = pts.map(p => p.v);
+    const zs = zoomDom(vals);
+    const color = riskOf(tone);
+    ZGEO = { vals, dates: pts.map(p => p.d), w: 960, h: 320, pad: 42, color,
+             dp: it.dp == null ? 2 : it.dp, unit: it.unit || '', dom: zs.dom || domOf(vals, .16) };
+    // 弹层会反复重画（自动刷新 / 切主题），lineChart 只覆盖自己的 svg，上一次的占位文字要手动清掉
+    host.innerHTML = '';
+    lineChart(host, pts, { color, w: ZGEO.w, h: ZGEO.h, pad: ZGEO.pad, fmt: d => d, dom: ZGEO.dom,
+                           aria: it.name + ' 历史曲线（放大）' });
+    if (zs.cut) cutNote = `<br><b>纵轴按 2%~98% 分位截断</b>：真实全域 ${nfd(zs.cut.min, 4)} ~ ${nfd(zs.cut.max, 4)}，` +
+      `${zs.cut.out} 个点落在画框尺度外（照画，只是超出顶部被裁掉）。`;
+  } else {
+    host.innerHTML = `<div class="zempty">${it.ok
+      ? `这条卡只有 ${pts.length} 个历史点，画不出曲线。`
+      : `取数失败，没有历史曲线。<br>${esc(oneLine(it.error || it.verdict || '上游未给出原因'))}`}</div>`;
+  }
+  // hist_points 只在 summary 响应里给；没给就不编一个数出来，只报本卡实际点数
+  const hp = DATA && DATA.hist_points;
+  $('z-foot').innerHTML =
+    `横轴是日线日期，纵轴就是卡片上那个大数字所在的那条序列 —— <b>与卡片迷你图同源同数据，放大只是把它画大</b>。` +
+    `把鼠标移到曲线上（触屏点一下）即可看该点日期与数值。` +
+    `本卡下发 ${pts.length} 个采样点` +
+    (hp ? `（服务端 <span class="num">api/btc.py</span> 的 HIST_POINTS=${esc(hp)} 是抽样目标，按它等间隔抽样，条数就在它附近）`
+        : `（服务端 <span class="num">api/btc.py</span> 按 HIST_POINTS 等间隔抽样下发）`) +
+    `。要更长历史得改那个常量。${cutNote}` +
+    (it.note ? `<br>${esc(it.note)}` : '');
+}
+
+function topPaint() {
+  const b = $('top-badge');
+  if (!DATA) { b.textContent = '○ 待取数'; b.className = 'cadb'; return; }
+  const ok = !!DATA.ok;
+  b.textContent = ok ? '● 已取到' : '○ 全部不可达';
+  b.className = 'cadb' + (ok ? ' live' : '');
+  b.style.marginTop = '0'; b.style.marginLeft = 'auto';
+  $('top-spot').innerHTML = DATA.spot != null ? `$${nfd(Math.round(DATA.spot), 0)}<u>日线收盘</u>` : '—';
+  $('top-from').textContent = DATA.kline_from || '不可达';
+  $('top-asof').textContent = DATA.asof || '—';
+  const c = DATA.count || { total: 0, ok: 0, failed: 0 };
+  $('top-count').textContent = `${c.ok} / ${c.total}（缺位 ${c.failed}）`;
+  const f = (DATA.failed || []).map(x => `${esc(x.key)}：${esc(x.error)}`).join(' · ');
+  $('top-failed').innerHTML = f ? oneLine(f) : '无';
+  $('asof').textContent = '探测于 ' + new Date().toLocaleTimeString('zh-CN', { hour12: false }) +
+    (DATA.time ? ' · 服务端 ' + DATA.time : '');
+}
+function oneLine(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); }
+
+function paint() {
+  topPaint();
+  const items = (DATA && DATA.items) || [];
+  if (!items.length) {
+    const why = oneLine((DATA && (DATA.error || DATA.message)) || '响应里没有 items —— 服务未启动或不可达？');
+    $('grid').innerHTML = `<div class="note bad" style="grid-column:1/-1">取数服务没有返回任何指标：${esc(why)}</div>`;
+    return;
+  }
+  $('grid').innerHTML = items.map(card).join('');
+  $('grid').querySelectorAll('[data-re]').forEach(btn => {
+    btn.addEventListener('click', e => retry(e.target.closest('.icard').id.slice(2), btn));
+  });
+  $('grid').querySelectorAll('[data-zoom]').forEach(btn => {
+    btn.addEventListener('click', e => zoom(e.target.closest('.icard').id.slice(2)));
+  });
+  if (ZKEY) zPaint();          // 自动刷新或重试之后，弹层跟着这张卡的最新读数走
+}
+
+async function retry(key, btn) {
+  btn.disabled = true; btn.textContent = '取数中';
+  try {
+    const r = await fetch(`/api/btc/one?k=${encodeURIComponent(key)}&force=1`, { cache: 'no-store' });
+    const it = await r.json();
+    const i = DATA.items.findIndex(x => x.key === key);
+    if (i >= 0) DATA.items[i] = it;
+    paint();
+    setStatus('livestat', `${it.name} 已重取${it.ok ? '' : '：仍失败'}`, it.ok ? 'ok' : 'bad');
+  } catch (e) {
+    setStatus('livestat', `${key} 重取失败：${e.message || e}`, 'bad');
+  } finally { btn.disabled = false; }
+}
+
+async function load(force) {
+  setStatus('livestat', force ? '穿透缓存重取中（首屏约 10 秒）…' : '取数中…');
+  clearTimeout(liveTimer);
+  const c = new AbortController();
+  liveTimer = setTimeout(() => c.abort(), 150000);
+  try {
+    const r = await fetch('/api/btc/summary' + (force ? '?force=1' : ''), { signal: c.signal, cache: 'no-store' });
+    DATA = await r.json();
+    setStatus('livestat', DATA.ok ? `在线 · ${DATA.count.ok}/${DATA.count.total} 项有数` : '全部指标取数失败', DATA.ok ? 'ok' : 'bad');
+  } catch (e) {
+    const why = e.name === 'AbortError' ? '超时（>150s）已中断等待' : (e.message || e);
+    DATA = { ok: false, items: [], error: String(why), count: { total: 12, ok: 0, failed: 12 } };
+    setStatus('livestat', `不可达：${why}`, 'bad');
+  } finally { clearTimeout(liveTimer); }
+  paint();
+}
+
+/* 口径表：与 api/btc.py 的注释同源，行号指向 cryptoTrader（那个项目只读参考，本页不改它） */
+const RULES = [
+  ['恐慌贪婪指数', 'alternative.me 日线序列，原值 0~100', '≤24 极度恐慌（抄底窗口）· 25~49 恐慌 · 50~74 贪婪 · ≥75 极度贪婪', 'handle_fear.py:104'],
+  ['AHR999 定投指数', '取上游现成数值（本页不自算公式）', '&lt;0.45 抄底区 · 0.45~2 中性 · ≥2 顶部危险', 'handle_AHR999.py:33 / operationConfig.py:213,328'],
+  ['CBBI 牛熊信心指数', 'latest.json 的 Confidence ×100（0~1 刻度换算）', '≤35 底部区（≤20 最硬）· 35~80 中性 · ≥80 顶部区', 'handle_CBBI.py:61-93 / operationConfig.py:214,327'],
+  ['CVDD 累计价值币天销毁', 'Looknode 现值，与本页同一 K 线源的收盘比对', '现价 ≤ CVDD×1.05 → 历史底部支撑区', 'handle_CVDD.py:123-151 / operationConfig.py:218'],
+  ['EMA5/EMA10', 'k=2/(n+1)，第 n−1 根用 SMA 播种，之前填当根收盘', '本根上穿=金叉 · 下穿=死叉 · 否则看快线上下', 'handle_EMA.py:74-87,106'],
+  ['EMA5/EMA10（新版）', '同上，唯一区别是播种前留 None', '同上（只用最后两根判交叉）', 'handle_EMA_new.py:50-68'],
+  ['KDJ(9,3,3)', 'RSV=(C−LLV9)/(HHV9−LLV9)×100；K=近3根RSV算术均值，D=近3根K算术均值，J=3K−2D', '本页标 K 的 80/20 超买超卖（通用读法，上游未设阈值）', 'handle_KDJ.py:112-142'],
+  ['Look Into Bitcoin', 'supply-in-profit 序列最后一个点（%）', '&lt;50% 历史大底层 · 55~65% 熊市中期', 'handle_LookIntoBitcoin.py:23-28 / handle_fuckbtc.py:1170'],
+  ['MACD(12,26,9)', '信号线只对 macd[25:] 做 EMA9 再补 None；柱=线−信号', '本根上穿=金叉 · 下穿=死叉', 'handle_MACD.py:73-127'],
+  ['MVRV', 'Looknode 市值/实现市值，原值倍数', '≤1.0 全网浮亏（底部区）· 顶部无口径故不设', 'handle_MVRV.py:28-32 / operationConfig.py:215'],
+  ['NUPL', 'NUPL = 1 − 1/MVRV（Looknode 免费推算路径）', '>0.75 极度贪婪 · 0.5~0.75 乐观 · 0.25~0.5 中性 · 0~0.25 焦虑 · −0.25~0 绝望 · &lt;−0.25 极度绝望', 'handle_NUPL.py:17-24,287'],
+  ['SOPR Z-Score', 'z=(末值−均值)/总体std，窗口 365 天；取可用分量的算术均值', 'z &lt; −0.44 底部区域 · z > 0.73 顶部区域', 'handle_SOPR_Z-Score.py:55-58,76-87,284-290,360-367'],
+];
+$('rules-body').innerHTML = RULES.map(r =>
+  `<div class="kv"><span><i>${r[0]}</i><br><span style="font-size:11px;color:var(--tx3)">${r[1]}</span><br><span style="font-size:11px;color:var(--tx2)">判定：${r[2]}</span></span><b>${r[3]}</b></div>`).join('');
+
+$('rf').addEventListener('click', () => load(false));
+$('rff').addEventListener('click', () => load(true));
+Board.nav('tabs');
+load(false);
+Board.autoSync(() => load(false), 60000);
+/* 放大入口有三个，故意都做在「整张卡」这一层：卡片右上角的 ⤢ 放大按钮（唯一看得见的那个）、双击卡片任意位置、
+   键盘 Tab 到卡片按 Enter。之前只挂在双击上太隐蔽，没人想得到去双击一张卡。
+   用 #grid 事件委托 —— paint() 每轮都重建 innerHTML，逐卡绑定会随重画失效。 */
+$('grid').addEventListener('dblclick', e => {
+  const c = e.target.closest('.icard');
+  if (!c) return;
+  if (e.target.closest('button,a') && !e.target.closest('[data-zoom]')) return;   // 「重试」自己响应单击，别顺手弹层
+  if (getSelection) getSelection().removeAllRanges();   // 双击顺手选的词留在遮罩背后碍眼
+  zoom(c.id.slice(2));
+});
+$('grid').addEventListener('keydown', e => {           // 键盘等价入口：Tab 到卡片按 Enter
+  if (e.key === 'Enter' && e.target.classList.contains('icard')) zoom(e.target.id.slice(2));
+});
+$('z-close').addEventListener('click', closeZoom);
+$('zmask').addEventListener('mousedown', e => { if (e.target === $('zmask')) closeZoom(); });
+addEventListener('keydown', e => { if (e.key === 'Escape') closeZoom(); });
+/* 悬浮读数绑在 #z-chart 容器上（paint/zPaint 只换它里面的 svg，容器本身不换，所以一次绑定就够） */
+$('z-chart').addEventListener('pointermove', zHover);
+$('z-chart').addEventListener('pointerdown', zHover);
+$('z-chart').addEventListener('pointerleave', zHoverOff);
+/* 卡片刻度图（spark）按 tone 写死颜色、不读主题变量，不用重画；放大图的 lineChart 读 --grid/--tick/--lbl，
+   取色在生成时固化，所以只有弹层开着时切主题需要重画它 */
+addEventListener('themechange', () => { if (ZKEY) zPaint(); });
+</script>
+</body>
+</html>

@@ -138,6 +138,28 @@ def short_err(e):
     return (s or type(e).__name__)[:40]
 
 
+def conn_err(reason):
+    """把 urllib 的底层连接错误翻成「哪儿不通」。
+
+    不翻译的话页面上会出现 `[Errno 2] No such file or directory` 这种只有本机代理客户端才会
+    吐出来的词，看着像本服务自己崩了（2026-09-23 的 AHR999 / Look Into Bitcoin 两张卡就是这样被
+    当成 bug 报上来的）。这类 errno 来自出口代理：域名失效或规则拦掉时它不回 DNS 错误，直接回 ENOENT。
+    """
+    s = str(reason) or type(reason).__name__
+    no = getattr(reason, "errno", None)
+    if no in (2, 22) or "Errno 2]" in s:
+        return "本机代理拒绝该域名（域名已失效或被规则拦截）"
+    if "getaddrinfo" in s or no == 11001:
+        return "域名解析失败"
+    if "ssl" in s.lower() or "EOF occurred" in s:
+        return "TLS 握手失败（上游直接断开连接，多半已停服）"
+    if "timed out" in s.lower():
+        return "超时"
+    if "10061" in s or "refused" in s.lower():
+        return "连接被拒（本机代理没开，或目标端口不通）"
+    return s[:60]
+
+
 def setup_logging():
     """日志写 <项目>/logs/board_server.log；每日轮转留 14 天，目录不可写只降级为控制台。"""
     global _log_ready
@@ -211,7 +233,7 @@ def remote(url, as_json=False, ms=20000, tag="up", browser_ua=False, headers=Non
     except (socket.timeout, TimeoutError):
         err = "超时"
     except urllib.error.URLError as e:
-        err = str(e.reason)[:60] or "网络不可达"
+        err = conn_err(e.reason) or "网络不可达"
     if err is None and not expect_html \
             and ("<html" in body[:400].lower() or "Object moved" in body[:400]) and not as_json:
         err = "上游返回 HTML（可能被限流）"

@@ -56,6 +56,8 @@ nav.tabs a.on,nav.tabs button.on{color:var(--gold);border-color:var(--goldline2)
   padding:5px 11px;border-radius:6px;cursor:pointer;font-family:inherit;transition:.15s}
 .rf:hover{color:var(--gold);border-color:var(--gold)}
 .rf:disabled{opacity:.45;cursor:wait}
+/* .rf 也用于跳转链接（Index 顶栏的「BTC监控」）：链接版去掉下划线，其余与按钮一致 */
+a.rf{text-decoration:none;text-align:center}
 
 .wrap{max-width:1360px;margin:0 auto;padding:26px 22px 90px}
 

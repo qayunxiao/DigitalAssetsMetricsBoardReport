@@ -23,6 +23,7 @@ import os
 import re
 from datetime import date, datetime, timezone
 
+import db
 from core import (ROOT, cached, downsample, fred_series, gov_lock, log, one_line, remote,
                   sma, yahoo_bars)
 
@@ -240,6 +241,9 @@ def record(ticker, score):
         w.writerow(["date", "ticker", "score"])
         w.writerows(rows)
     log.info("[record] %s 当日评分 %.1f 已写入 risk_history.csv（共 %d 条）", ticker, score, len(rows))
+    # CSV 是权威（换机迁移带它），库里那份只是同日覆盖的镜像；db.store_risk 内部吞异常，
+    # 没启用落库时它是个空操作，不会因为连不上库把这次记录写成失败。
+    db.store_risk(today, ticker, score)
     return True
 
 

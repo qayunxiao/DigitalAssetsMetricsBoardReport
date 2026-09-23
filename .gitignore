@@ -2,3 +2,9 @@ __pycache__/
 .idea/
 logs/
 data/report_quota.json
+# 根目录 indicator.ini 里是**活的凭据**（CoinGlass / CryptoQuant Key、钉钉 SECRET+TOKEN、TG BOT_TOKEN、TradingView 口令）。
+# 这仓库是公开的，deploy_app.sh 又按 `git ls-files` 打上传包，所以它既不入库也不进包；
+# 服务运行本身不读它（口径/阈值都在代码里），需要密钥的取数路径只认环境变量，例如 COINGLASS_KEY。
+indicator.ini
+# local.ini 同样是本机凭据文件（数据库账号口令），不入库不进包。
+local.ini

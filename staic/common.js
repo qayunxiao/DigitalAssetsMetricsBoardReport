@@ -67,12 +67,13 @@
     if (a.length < 2) return '';
     return `<svg class="spark" viewBox="0 0 200 26" preserveAspectRatio="none" width="100%" height="26" aria-hidden="true"><path d="${svgPath(a, 200, 26, 3)}" fill="none" stroke="${color}" stroke-width="1.6" vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
   }
-  /* 通用折线图：rows=[{d,v}]，dates 取首/中/末三个标签 */
-  function lineChart(el, rows, { color = '#d4af37', w = 680, h = 200, pad = 34, fmt = md, area = true, aria = '' } = {}) {
+  /* 通用折线图：rows=[{d,v}]，dates 取首/中/末三个标签。dom 给了就用它当纵轴范围（放大图按分位截断用），
+     不给则按数据全域上下各留 16%。 */
+  function lineChart(el, rows, { color = '#d4af37', w = 680, h = 200, pad = 34, fmt = md, area = true, aria = '', dom = null } = {}) {
     if (!el) return;
     const v = rows.map(x => x.v);
     if (v.filter(Number.isFinite).length < 2) { el.innerHTML = ''; return; }
-    const [mn, mx] = domOf(v, .16);
+    const [mn, mx] = (dom && dom.length === 2 && Number.isFinite(dom[0]) && Number.isFinite(dom[1])) ? dom : domOf(v, .16);
     const Y = x => h - pad - (x - mn) / (mx - mn) * (h - pad * 2);
     const st = (w - pad * 2) / (v.length - 1), X = i => pad + st * i;
     let g = '';
@@ -103,6 +104,7 @@
   const SUB = IN_SUB ? '' : 'staic/';
   const PAGES = [
     { id: 'index', href: ROOT + 'Index.html', label: '看板主页' },
+    { id: 'btc', href: SUB + 'btc.html', label: 'BTC监控' },
     { id: 'liquidity', href: SUB + 'Liquidity.html', label: '宏观流动性' },
     { id: 'crash', href: SUB + 'USStockCrashMonitor.html', label: '美股崩盘监测' },
     { id: 'allocation', href: SUB + 'GlobalQualityAssetAllocation.html', label: '资产配置' },
