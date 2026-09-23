@@ -28,7 +28,6 @@ from datetime import date
 from core import (ROOT, cached, downsample, fred_series, gov_lock, log, sma,
                   yahoo_bars)
 import liquidity
-import db
 
 ASSET_TTL = 600
 ASSETS = {          # 白名单：Yahoo 符号 -> 中文名（日志用）。绝不允许任意 URL / 任意符号转发。
@@ -249,11 +248,6 @@ def r_report(q):
         return 429, {"ok": False, "kind": kind, "quota": q,
                      "error": "今天已发送 %d 次了，明天再来" % kq["limit"]}
     ok, d = run_report(kind)
-    # 留痕一行：只记元数据（kind / 成败 / 耗时 / 字符数 / 当天第几次），**报表正文不落库**——
-    # 正文里是持仓明细与金额，而这套库与账号是共享环境。store_report 内部吞异常，不影响这次返回。
-    db.store_report(kind, ok, sec=d.get("sec") or 0, chars=len(d.get("stdout") or ""),
-                    quota_used=(q["kinds"][kind]["limit"] - _quota()["kinds"][kind]["left"]),
-                    err=d.get("error") or "")
     return (200 if ok else 502), {"ok": ok, "kind": kind, "quota": _quota(), **d}
 
 
