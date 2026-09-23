@@ -106,11 +106,11 @@ if [ "$MODE" = "git" ] && [ "$SYNC" = 1 ]; then
   echo "=== 1. 同步仓库 ==="
   sync_repo "$REPO_DIR" "$REPO_URL"   || sync_failed="看板仓库 $REPO_DIR（clone/fetch/快进失败：网络、凭证，或目录里有本地改动。本地改动请自己 git -C $REPO_DIR status 看过再决定，本脚本不会替你 reset；急着装现有内容就加 --no-pull）"
   sync_repo "$CRYPTO_DIR" "$CRYPTO_REPO" || echo "    ⚠ cryptoTrader 没同步成功，沿用目录里现有的脚本与持仓数据（$CRYPTO_DIR）"
-  cp /home/myaibtc/allocation.py /home/myaibtc/domains/myaibtc.serv00.net/api/allocation.py
-  cp /home/myaibtc/config.ini /home/myaibtc/domains/myaibtc.serv00.net/config.ini
 fi
 
 # ---------- 3. 装机：把跟踪文件铺到站点根 ----------
+cp /home/myaibtc/allocation.py /home/myaibtc/domains/myaibtc.serv00.net/api/allocation.py
+cp /home/myaibtc/config.ini /home/myaibtc/domains/myaibtc.serv00.net/config.ini
 if [ "$MODE" = "reload" ]; then
   echo "=== 2/3. 跳过装机（--reload）==="
 elif [ "$MODE" = "zip" ]; then
