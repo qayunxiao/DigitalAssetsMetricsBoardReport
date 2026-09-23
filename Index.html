@@ -38,7 +38,7 @@
   .rptline:empty{display:none}
   .lbar{flex-wrap:wrap}
   .svcbar:empty{display:none}
-  /* 报告弹出框：成功只报一句「已发送」，3 秒自己消失；失败不自动消失（要点「看输出」），✕ 手动关 */
+  /* 报告弹出框：成功只报一句「已发送」，3 秒自己消失；失败不自动消失（要给足时间读报错摘要），✕ 手动关 */
   .toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);z-index:50;max-width:min(680px,92vw);
     display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:10px;font-size:13px;line-height:1.6;
     background:var(--panel);border:1px solid var(--green);color:var(--tx);box-shadow:0 8px 28px rgba(0,0,0,.35)}
@@ -66,18 +66,13 @@
     <div class="brand"><b><a href="Index.html">Lattice</a></b><span>Digital Assets Metrics Board</span></div>
     <nav class="tabs" id="tabs" aria-label="看板导航"></nav>
     <div class="asof num" id="asof"></div>
-    <div class="lbar"><a class="rf" href="staic/btc.html" title="12 项 BTC 日线指标（恐慌贪婪 / AHR999 / CBBI / CVDD / EMA / KDJ / MACD / MVRV / NUPL / SOPR Z）">BTC监控</a><button class="rf" id="rf" type="button">↻ 重新探测</button><button class="rf" id="rpt-crypto" type="button">加密持仓报告</button><button class="rf" id="rpt-us" type="button">US股持仓报告</button></div>
+    <div class="lbar"><a class="rf" href="staic/btc.html" title="BTC 日线指标（恐慌贪婪 / AHR999 / CBBI / CVDD / EMA / KDJ / MACD / MVRV / NUPL / SOPR Z / 2年MA乘数通道）">BTC监控</a><button class="rf" id="rf" type="button">↻ 重新探测</button><button class="rf" id="rpt-crypto" type="button">加密持仓报告</button><button class="rf" id="rpt-us" type="button">US股持仓报告</button></div>
   </div>
 </header>
 
 <div class="wrap">
   <div class="svcbar" id="svc"></div>
   <span class="rptline" id="rpt-msg" aria-live="polite"></span>
-
-  <section id="rpt-panel" hidden>
-    <div class="shead"><h2>持仓报告 · 脚本输出</h2><span class="tagline">按需展开：成功只弹「已发送」，这里放的是点开的 stdout / 失败输出</span><div class="rule"></div><button class="rf" id="rpt-close" type="button">收起 ✕</button></div>
-    <div class="panel"><pre id="rpt-body" class="formula" style="white-space:pre-wrap;margin:0;max-height:60vh;overflow:auto"></pre></div>
-  </section>
 
   <section id="entries">
     <div class="shead"><h2>监控面板</h2><span class="tagline">状态 = <span class="num">/api/&lt;模块&gt;/health</span> 实时探测 · BTC 为首页内嵌区块</span><div class="rule"></div></div>
@@ -188,7 +183,7 @@
 
 </div>
 
-<div class="toast" id="toast" hidden role="status" aria-live="polite"><span id="toast-msg"></span><button class="rf" id="toast-more" type="button" hidden>看输出</button><button class="rf" id="toast-x" type="button" title="关闭">✕</button></div>
+<div class="toast" id="toast" hidden role="status" aria-live="polite"><span id="toast-msg"></span><button class="rf" id="toast-x" type="button" title="关闭">✕</button></div>
 
 <footer>
   <p>公共样式与脚本：<span class="num">staic/common.css · staic/common.js</span>（三子页面与本页共享）。模块代码与约定见 <span class="num">api/</span> 与 <span class="num">api/Liquidity/Qoder.md</span>。</p>
@@ -381,15 +376,13 @@ probe();
 Board.autoSync(probe, 60000);
 
 /* ---- 持仓报告：两个 kind 都由服务端运行 cryptoTrader 对应的报表脚本（无参数运行即推送 TG，点一次发一条）。
-        成功只在右下角弹一句「已发送」，3 秒自动消失，不再往页面里铺一大块脚本输出；报表正文要点「查看报表」才展开。
-        失败弹的是不自动消失的红框（要留时间看清并点「看输出」）。次数上限各自计数（加密 3/天、美股 2/天），见 config.ini [report]。---- */
+        页面只显示运行状态（运行中 / 已发送 / 失败原因），不展示后端脚本的 stdout —— 报表正文看 Telegram。
+        失败弹的是不自动消失的红框（要留时间看清）。次数上限各自计数（加密 3/天、美股 2/天），见 config.ini [report]。---- */
 const RPT = { crypto: { nm: '加密', tip: '服务端读单 + 逐单拉币价，最长约 3 分钟' },
               us: { nm: 'US股', tip: '服务端读美股 CSV 汇总 + 推送，通常十几秒' } };
 const rptMsg = {};
-const rptCache = {};
 let quota = null, rptRunning = false;
 function rptPaint() { $('rpt-msg').innerHTML = Object.values(rptMsg).join(' · '); }
-rptPaint.n = 0;
 function setQuota(q) {                 // 服务端 data/report_quota.json 说了算，页面只是照抄
   if (q) quota = q;
   if (!quota) return;
@@ -403,11 +396,6 @@ function setQuota(q) {                 // 服务端 data/report_quota.json 说�
                       : `今天已发送 ${kq.limit} 次了，明天再来（${quota.date}）`;
   }
 }
-function rptLink(txt, label) {
-  const id = 'rpt-' + (++rptPaint.n);
-  rptCache[id] = txt;
-  return `<a href="javascript:void 0" style="color:var(--gold)" data-rpt="${id}">${label} →</a>`;
-}
 function getReport(kind, btn) {
   const nm = (RPT[kind] || {}).nm || kind;
   rptMsg[kind] = `<b style="color:var(--amber)">${nm}报告</b> 运行中…（${(RPT[kind] || {}).tip || '服务端跑脚本'}）`; rptPaint();
@@ -417,14 +405,11 @@ function getReport(kind, btn) {
     .then(r => r.json()).then(j => {
       setQuota(j.quota);
       if (j.ok) {
-        rptMsg[kind] = `<b style="color:var(--green)">${nm}报告</b> 已发送${j.sec ? ' · ' + j.sec + 's' : ''} · ` +
-          rptLink(j.stdout || '（脚本无输出）', '查看报表');
+        rptMsg[kind] = `<b style="color:var(--green)">${nm}报告</b> 已发送${j.sec ? ' · ' + j.sec + 's' : ''}`;
         toast(`${nm}持仓报告已发送 · 报表已推送到 Telegram${j.sec ? ' · ' + j.sec + 's' : ''}`);
       } else {
-        rptMsg[kind] = `<b style="color:var(--red)">${nm}报告</b> ${j.error || '运行失败'}` +
-          (j.stdout ? ' · ' + rptLink(j.stdout, '看输出') : '');
-        toast(`${nm}报告失败：${j.error || '运行失败'}`, { err: true, sticky: true,
-          more: j.stdout ? () => showReport(j.stdout) : null });
+        rptMsg[kind] = `<b style="color:var(--red)">${nm}报告</b> ${j.error || '运行失败'}`;
+        toast(`${nm}报告失败：${j.error || '运行失败'}`, { err: true, sticky: true });
       }
     }).catch(e => {
       const why = e.name === 'AbortError' ? '超时（>200s）已中断等待，服务端报表进程结束后会自行收尾' : (e.message || e);
@@ -432,30 +417,16 @@ function getReport(kind, btn) {
       toast(`${nm}报告失败：${why}`, { err: true, sticky: true });
     }).finally(() => { rptRunning = false; rptPaint(); setQuota(); clearTimeout(tid); });
 }
-let toastTimer = null, toastMore = null;
+let toastTimer = null;
 function toast(msg, o) {
   clearTimeout(toastTimer);
   $('toast-msg').textContent = msg;          // 只走 textContent：脚本输出不许当 HTML 塞进来
-  toastMore = (o && o.more) || null;
-  $('toast-more').hidden = !toastMore;
   const t = $('toast');
   t.classList.toggle('err', !!(o && o.err));
   t.hidden = false;
   if (!(o && o.sticky)) toastTimer = setTimeout(() => { t.hidden = true; }, (o && o.ms) || 3000);
 }
-$('toast-more').addEventListener('click', () => { if (toastMore) { $('toast').hidden = true; toastMore(); } });
 $('toast-x').addEventListener('click', () => { clearTimeout(toastTimer); $('toast').hidden = true; });
-function showReport(text) {
-  const p = $('rpt-panel');
-  $('rpt-body').textContent = text;
-  p.hidden = false;
-  p.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-}
-$('rpt-msg').addEventListener('click', e => {
-  const id = e.target && e.target.getAttribute && e.target.getAttribute('data-rpt');
-  if (id && rptCache[id] != null) showReport(rptCache[id]);
-});
-$('rpt-close').addEventListener('click', () => { $('rpt-panel').hidden = true; });
 $('rpt-crypto').addEventListener('click', () => getReport('crypto', $('rpt-crypto')));
 $('rpt-us').addEventListener('click', () => getReport('us', $('rpt-us')));
 </script>

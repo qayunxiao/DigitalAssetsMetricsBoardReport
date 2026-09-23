@@ -10,7 +10,7 @@ import core
 def build(warm=True):
     """注册四个模块并初始化日志。warm=False 用于 WSGI：Passenger 会起多个进程，
     每进程都在启动时打一轮上游只会重复打源（且拖慢冷启动），交给首个请求按需取数。
-    liquidity 与 btc 的 warm 只在本地版跑：前者预热 ccxt 的 load_markets，后者预热 12 项上游。"""
+    liquidity 与 btc 的 warm 只在本地版跑：前者预热 ccxt 的 load_markets，后者逐项预热各上游（项数看 btc.INDICATORS）。"""
     import liquidity
     import crash
     from api import allocation

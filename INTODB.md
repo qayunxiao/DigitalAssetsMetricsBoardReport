@@ -1,6 +1,6 @@
 # 哪些指标入库、哪些完全走接口
 
-一句话地图：**只有 BTC 指标页那 12 项是真正落库的数据**，其余页面要么只留执行痕迹，要么每次现打上游。
+一句话地图：**只有 BTC 指标页那一组日更指标是真正落库的数据**，其余页面要么只留执行痕迹，要么每次现打上游。
 本文按"落到哪儿"分四层列全，并给出核对方法。行号截至 2026-09-23。
 
 前提（改之前先记住）：`api/db.py` 是**旁路**，不是主路。没装 pymysql、库不通、表没建，都只让
@@ -9,18 +9,18 @@
 
 ---
 
-## A. 进 MySQL：BTC 指标页 12 项，全进
+## A. 进 MySQL：BTC 指标页全部指标，全进
 
-`api/btc.py:747` 的 `STORE_DAILY = set(_KEYS)` 是 12 个 key 的**全集**，没有一项被排除。
-写入点 `api/btc.py:793` → `db.store_btc()`（`api/db.py:255`），一轮 summary 写三张表：
+`api/btc.py` 的 `STORE_DAILY = set(_KEYS)` 是 INDICATORS 里全部 key 的**全集**（写这行时 13 个），没有一项被排除。
+写入点 `summary()` 末尾 → `db.store_btc()`（`api/db.py:255`），一轮 summary 写三张表：
 
 | 落库位置 | 写什么 | 受哪个开关管 |
 |---|---|---|
 | `board_run_log` | 每轮一行：`ok_count/total_count`、`elapsed_ms`、**现价 `spot`**、`kline_src`、`failed_keys`；`lastrowid` 反指给读数当 `run_id` | `[mysql] STORE_BTC` |
-| `board_indicator_daily` | 12 行日读数：`value`、`tone`、`verdict`、`src`、`hist_points`、`extras_json`、`error` | 同上 |
-| `board_series_daily` | 每张卡 `hist[]` 的迷你历史（≤120 点），`series_key` = `btc:fear` … `btc:sopr` | `[mysql] STORE_SERIES` |
+| `board_indicator_daily` | 每项一行日读数：`value`、`tone`、`verdict`、`src`、`hist_points`、`extras_json`、`error` | 同上 |
+| `board_series_daily` | 每张卡 `hist[]` 的迷你历史（≤120 点），`series_key` = `btc:fear` … `btc:two_year_multiply` | `[mysql] STORE_SERIES` |
 
-`_stamp()`（`api/btc.py:750`）给每卡盖标识，页面「入库」小标读的就是它：
+`_stamp()`（`api/btc.py:820`）给每卡盖标识，页面「入库」小标读的就是它：
 
 * `daily+hist` —— 这张卡本轮给了数**且**给了历史点 → 读数 + 序列都写；
 * `daily` —— 这张卡**取数失败**（`hist` 为空）。失败行照写：`value=NULL` + `error` 有值。
@@ -30,7 +30,7 @@
 | 指标 key | 名称 | 上游 | 历史序列入库 |
 |---|---|---|---|
 | `fear` | 恐慌贪婪指数 | alternative.me | ✓ `btc:fng` 取数、`btc:fear` 序列 |
-| `ahr999` | AHR999 定投指数 | coinsoto `getAhr999Table` | ✓ |
+| `ahr999` | AHR999 定投指数 | Looknode `/api/Ahr999`（2026-09-23 起；原先记的是 coinsoto `getAhr999Table`，那条已不可达） | ✓ |
 | `cbbi` | CBBI 牛熊信心指数 | 多源拼装 + 本地自算 | ✓ |
 | `cvdd` | CVDD 累计价值币天销毁 | Looknode | ✓（判定还要现价的，靠 `btc:klines`） |
 | `ema` / `ema_new` | EMA5/EMA10 交叉（两种播种口径） | **日线自算**（`btc:klines`） | ✓ 存 EMA5 折线，不是 OHLC |
@@ -40,8 +40,9 @@
 | `mvrv` | MVRV 市值/实现市值 | Looknode | ✓ |
 | `nupl` | NUPL 净未实现盈亏比 | 由 MVRV 推算（免费档） | ✓ |
 | `sopr` | SOPR Z-Score | 由 MVRV 推算，三个 Z 分量只剩 `nupl_z`（Bitbo 实测 401） | ✓ |
+| `two_year_multiply` | 2年MA乘数通道 | Looknode `/api/twoYearMultiply`（下沿 730MA 原值；判定要现价，走 `btc:klines`） | ✓ 存下沿自身 |
 
-`mvrv` / `nupl` / `sopr` 共用同一次 Looknode 取数（`mvrv_rows()`，`api/btc.py:235`），所以库里是三行独立
+`mvrv` / `nupl` / `sopr` 共用同一次 Looknode 取数（`mvrv_rows()`，`api/btc.py:264`），所以库里是三行独立
 `series_key`、上游只有一次请求。
 
 ## B. 入库，但只存分数与执行痕迹
@@ -74,7 +75,8 @@
 |---|---|
 | `btc:looknode:mvrv` | mvrv + nupl + sopr（一次取数喂三张卡） |
 | `btc:looknode:cvdd` | cvdd |
-| `btc:cbbi` / `btc:litb` / `btc:ahr999` / `btc:fng` | cbbi / litb / ahr999 / fear |
+| `btc:looknode:two_year_multiply` | two_year_multiply（`looknode_band()` 与 `looknode()` 共用 `btc:looknode:` 前缀，加指标不用改 DAY_KEYS） |
+| `btc:cbbi` / `btc:litb` / `btc:ahr999` / `btc:fng` | cbbi / litb / ahr999 / fear；ahr999 现在是内层 `btc:looknode:ahr999` + 外层 `btc:ahr999` 两层，同一份数据在 `data/daycache/` 落两个文件 |
 | `crash:shiller` / `crash:buffett` | 崩盘页 Shiller CAPE、巴菲特指标 |
 
 **不在名单上**（TTL 过就重新打）：`btc:klines`（900s，日内会变，故意不日缓存）、`alloc*`、`crash:fred:*`、
@@ -91,7 +93,7 @@ python api/db.py --status                        # 同一套信息，命令行�
 ```
 
 `tables` 的读法：`null` = 这张表不存在，数字 = 行数。库里到底该有几行，用 `sql/board_schema.sql` 建表后：
-每跑一轮 `/api/btc/summary` → `board_run_log` +1 行、`board_indicator_daily` 同日 12 行 UPSERT、
+每跑一轮 `/api/btc/summary` → `board_run_log` +1 行、`board_indicator_daily` 同日「指标项数」行 UPSERT（13 项就是 13 行）、
 `board_series_daily` 只在历史点数变化时重写（`_fingerprint`，`api/db.py:290`）。
 
 ## 当前实际状态（2026-09-23）
@@ -102,5 +104,5 @@ python api/db.py --status                        # 同一套信息，命令行�
 * 服务器：`--init` 已成功（表在），但 Passenger 内存里仍是旧 `btc.py`（`/api/health` 的 `stale=true`），
   要 `touch tmp/restart.txt` 才换代码。
 
-两步做完，第一笔该是 `board_run_log` 1 行 + `board_indicator_daily` 12 行 + `board_series_daily` 约 120×11 行
+两步做完，第一笔该是 `board_run_log` 1 行 + `board_indicator_daily` 13 行 + `board_series_daily` 约 120×12 行
 （`litb` 那源大概率仍 502，那一格会是 `value=NULL` 的失败行）。

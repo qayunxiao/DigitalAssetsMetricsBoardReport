@@ -33,12 +33,12 @@ CREATE TABLE IF NOT EXISTS board_meta (
 
 -- ---------------------------------------------------------------------------
 -- board_indicator_daily：所有「一天一个读数」的指标，长表（一个指标一行，不给每个指标建表）。
--- 加一个指标 = 加一个 metric_key，不动表结构；页面 12 张卡里带「入库」标的都落这里，
+-- 加一个指标 = 加一个 metric_key，不动表结构；页面上带「入库」标的卡都落这里，
 -- 取数失败的卡也落（value 为 NULL + error 有值），否则「哪天哪个源断了」这种事后最想查的东西没地方查。
 -- ---------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS board_indicator_daily (
   id           BIGINT       NOT NULL AUTO_INCREMENT COMMENT '代理键',
-  metric_key   VARCHAR(32)  NOT NULL COMMENT '指标键，与 /api/btc/one?k= 同一个白名单：fear ahr999 cbbi cvdd ema ema_new kdj litb macd mvrv nupl sopr；跨模块新键要带命名空间前缀，如 fred:WALCL',
+  metric_key   VARCHAR(32)  NOT NULL COMMENT '指标键，与 /api/btc/one?k= 同一个白名单：fear ahr999 cbbi cvdd ema ema_new kdj litb macd mvrv nupl sopr two_year_multiply；跨模块新键要带命名空间前缀，如 fred:WALCL',
   metric_name  VARCHAR(64)  NOT NULL DEFAULT '' COMMENT '页面显示名，如「AHR999 定投指数」',
   unit         VARCHAR(16)  NOT NULL DEFAULT '' COMMENT '单位：倍 / % / 美元 / 空串（无量纲）',
   `date`       DATE         NOT NULL COMMENT '指标自身的作为日（上游 asof，UTC），不是抓取时刻——上游晚上更新时这两个会差一天',
@@ -57,7 +57,7 @@ CREATE TABLE IF NOT EXISTS board_indicator_daily (
   KEY idx_date (`date`),
   KEY idx_tone_date (tone, `date`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
-  COMMENT='指标读数（日频，长表）：12 项 BTC 日线指标 + 后续任何「一天一个数」的指标';
+  COMMENT='指标读数（日频，长表）：BTC 指标页全部日线指标 + 后续任何「一天一个数」的指标';
 
 -- ---------------------------------------------------------------------------
 -- board_series_daily：所有「按日期的数值序列」，同样是长表。

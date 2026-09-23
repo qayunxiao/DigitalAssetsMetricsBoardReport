@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
-"""BTC 指标监控（staic/btc.html）取数模块：12 项日线指标一次汇总。
+"""BTC 指标监控（staic/btc.html）取数模块：全部日线指标一次汇总。
 
 路由（由 app.py 挂载）：
   /api/btc/health                    模块自述（不打上游，首屏探测用）
-  /api/btc/summary[?force=1]         12 项一次返回，每项自带 ok / value / verdict / hist / error
-  /api/btc/one?k=<key>[&force=1]     单项重取（失败卡片上的「重试」走这条，不连累其余 11 项）
+  /api/btc/summary[?force=1]         各项一次返回，每项自带 ok / value / verdict / hist / error
+  /api/btc/one?k=<key>[&force=1]     单项重取（失败卡片上的「重试」走这条，不连累其余各项）
 
 口径来源：`api/Crypto/handle_*.py`（2026-09-23 由用户从 `D:/Qorder_ws/cryptoTrader/api_list/` 抄进仓库的
 只读副本，逐字节一致）与那份项目的 `utils/operationConfig.py` 阈值表（没抄进来，仍在原处）。
@@ -228,8 +228,37 @@ def looknode(url, key, force=False):
     return cached("btc:looknode:" + key, 3600, run, force)
 
 
+def looknode_band(url, key, force=False):
+    """Looknode 的双线通道（2年MA乘数 = 730MA 与 730MA×5）：`{"code":100,"data":[{"t":秒,"v1":上沿,"v2":下沿}]}`
+    → 升序 `[{d, lo, hi}]`。上游 v1 恒等 5×v2（5182 个点全域如此），这里照原样收下、不重算乘数。
+    与 looknode() 分开是因为字段名不同（v1/v2 而非 v），拿它去喂单值解析会得到 0 个点。"""
+    def run():
+        try:
+            j = _j(url, "btc:" + key, referer="https://www.looknode.com/charts")
+        except Exception as e:
+            return {"ok": False, "error": "Looknode %s: %s" % (key, short_err(e))}
+        if not isinstance(j, dict) or j.get("code") != 100:
+            return {"ok": False, "error": "Looknode %s 返回 code=%s" % (key, (j or {}).get("code"))}
+        rows = []
+        for p in j.get("data") or []:
+            t, hi, lo = p.get("t"), _num(p.get("v1")), _num(p.get("v2"))
+            if t is None or lo is None or hi is None:
+                continue
+            rows.append({"d": _d(t), "lo": lo, "hi": hi})
+        rows.sort(key=lambda r: r["d"])
+        if not rows:
+            return {"ok": False, "error": "Looknode %s 解析出 0 个点" % key}
+        log.info("[btc] looknode:%s %d 个点（%s → %s 下沿=%s 上沿=%s）", key, len(rows),
+                 rows[0]["d"], rows[-1]["d"], rows[-1]["lo"], rows[-1]["hi"])
+        return {"ok": True, "rows": rows, "src": "Looknode"}
+
+    return cached("btc:looknode:" + key, 3600, run, force)
+
+
 MVRV_URL = "https://www.looknode.com/api/mCapRealizedRatio"
 CVDD_URL = "https://www.looknode.com/api/CVDD"
+AHR999_URL = "https://www.looknode.com/api/Ahr999"     # 路径大小写敏感：小写 ahr999 回 404
+TWM_URL = "https://www.looknode.com/api/twoYearMultiply"    # 这条恰好是全小写开头，与页面 slug 同拼写
 
 
 def mvrv_rows(force=False):
@@ -317,9 +346,19 @@ def ahr999(force=False):
     capi 与 fapi 与 open-api 三代 coinglass 主机、btc123 历史站、bitcoin-data、blockchain.info/charts，全不通）：
       coinsoto  走代理 TLS 握手即 EOF、代理直拒该域名（Errno 2）、直连超时——三条路都过不去；
       soulbab   530 = Cloudflare 1016「源站 DNS 解析不到」，域名已经不存在；
-      CoinGlass v4 上确有 /api/index/ahr999、`CG-API-KEY` 也对，但回 401 Upgrade plan（要付费套餐）。"""
+      CoinGlass v4 上确有 /api/index/ahr999、`CG-API-KEY` 也对，但回 401 Upgrade plan（要付费套餐）。
+    同日修订：那句「looknode 没有 /api/ahr999」是错的——这条路径大小写敏感，页面 slug 是大写 A 的
+    `Ahr999`，`/api/Ahr999` 就是那张图的原始序列（5700+ 个点，当天更新），已与 MVRV/CVDD 走同一条
+    `looknode()` 通路并排在首选；coinsoto / soulbab / CoinGlass 三条按原顺序留着兜底。"""
     def run():
         errs = []
+        d = looknode(AHR999_URL, "ahr999", force)
+        if d.get("ok"):
+            rows = d["rows"]
+            return {"ok": True, "value": rows[-1]["v"], "avg200": None,      # avg 是价格 200 日均线，本序列给不了
+                    "prev": rows[-2]["v"] if len(rows) > 1 else None,
+                    "rows": rows, "src": "Looknode Ahr999"}
+        errs.append("looknode: " + str(d.get("error")))
         try:
             j = _j("https://coinsoto.com/indicatorapi/getAhr999Table", "btc:ahr", referer="https://coinsoto.com/")
             d = (j or {}).get("data") or []
@@ -464,7 +503,7 @@ def _kdj(bars, n=9, m1=3, m2=3):
     return k, dd, jv, rsv
 
 
-# ---------------------------------------------------------------- 12 张卡片
+# ---------------------------------------------------------------- 指标卡片
 
 def it_fear(force=False):
     d = fng(force)
@@ -733,15 +772,46 @@ def it_sopr(force=False):
                     "它和名字里的 SOPR 已经脱钩，看板上按分量构成如实标注，不改名也不补数。")
 
 
+def it_two_year_multiply(force=False):
+    """2年MA乘数通道（下沿 730MA / 上沿 730MA×5）。头条给上游原值（730MA，美元），本页不重算均线、不重算乘数；
+    判据照抄该站上「指标描述」原文：现价 < 730MA = 过度悲观区，现价 > 730MA×5 = 过度贪婪区。
+    现价借本页同一 K 线源的收盘，与 it_cvdd 同构；两边的 asof 可以差一天，extras 里各自标明来源。"""
+    d = looknode_band(TWM_URL, "two_year_multiply", force)
+    if not d.get("ok"):
+        return _mk("two_year_multiply", "2年MA乘数通道", "美元", error=d.get("error"))
+    rows = d["rows"]
+    lo, hi = rows[-1]["lo"], rows[-1]["hi"]
+    k = klines(force)
+    spot = k.get("spot") if k.get("ok") else None
+    if spot is None:
+        verdict, tone = "缺现价，无法与通道比对（K 线源也不可达）", "gray"
+    elif spot < lo:
+        verdict, tone = "现价 < 730MA（上游口径：过度悲观区）", "green"
+    elif spot > hi:
+        verdict, tone = "现价 > 730MA×5（上游口径：过度贪婪区）", "red"
+    else:
+        verdict, tone = "现价在通道内（730MA ~ 730MA×5）", "gray"
+    return _mk("two_year_multiply", "2年MA乘数通道", "美元", dp=0, value=lo, tone=tone, verdict=verdict,
+               asof=rows[-1]["d"], src="Looknode",
+               hist=_hist([{"d": r["d"], "v": r["lo"]} for r in rows]),      # 迷你图画的是下沿自身
+               extras=[{"k": "通道上沿（730MA×5）", "v": round(hi, 0)},
+                       {"k": "现价（同一 K 线源收盘）", "v": spot},
+                       {"k": "现价 / 730MA", "v": round(spot / lo, 3) if spot else None},
+                       {"k": "近 365 天分位（下沿自身）", "v": _pct_rank([r["lo"] for r in rows], lo)},
+                       {"k": "序列起点 / 点数", "v": "%s · %d" % (rows[0]["d"], len(rows))}],
+               note="「730 天」与「×5」是上游按历史回测挑的一组数值，它页面原文自己留了话：BTC 体量变大、牛熊振幅收窄后这组数值"
+                    "的效果可能打折，需要重新挑。本页只照抄它的两条线与它的判据，没有另设阈值。")
+
+
 INDICATORS = [
     ("fear", it_fear), ("ahr999", it_ahr999), ("cbbi", it_cbbi), ("cvdd", it_cvdd),
     ("ema", it_ema), ("ema_new", it_ema_new), ("kdj", it_kdj), ("litb", it_litb),
     ("macd", it_macd), ("mvrv", it_mvrv), ("nupl", it_nupl), ("sopr", it_sopr),
+    ("two_year_multiply", it_two_year_multiply),
 ]
 _KEYS = [k for k, _ in INDICATORS]
 
-# 入库标识（api/db.py 落库时照这个走，页面每张卡的「入库」小标也读它）：
-# 12 项**全部**入日读数，包括取数失败的那张——失败行 value=NULL + error 有值，
+# 入库标识（api/db.py 落库时照这个走，页面每张卡的「入库」小标也读它）：全部项**一律**入日读数，包括取数失败的那张——失败行 value=NULL + error 有值，
 # 否则「哪天哪个源断了」这种事后最想查的东西在库里没有痕迹（表结构见 sql/board_schema.sql）。
 # 历史序列（hist[]）只要那张卡本轮给了点就一并入 board_series_daily，键带 btc: 前缀。
 STORE_DAILY = set(_KEYS)
@@ -769,7 +839,7 @@ def one(key, force=False):
 
 
 def summary(force=False):
-    """12 项并行取数（每台主机自己串行，跨主机并行），整体约 8~12 秒，之后走各自的缓存。
+    """各项并行取数（每台主机自己串行，跨主机并行），整体约 8~12 秒，之后走各自的缓存。
     末尾的 `db.store_btc` 是**旁路**：没启用/连不上都只写一行日志，取数结果照原样返回。"""
     t0 = datetime.now(timezone.utc)
     with ThreadPoolExecutor(max_workers=5) as pool:

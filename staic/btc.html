@@ -3,13 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BTC 指标监控 · 12 项日线指标</title>
-<meta name="description" content="恐慌贪婪指数与 AHR999、CBBI、CVDD、EMA、EMA_new、KDJ、Look Into Bitcoin、MACD、MVRV、NUPL、SOPR Z-Score 的日线读数面板：数值、判定、迷你历史与上游来源时龄。口径抄自 cryptoTrader 的各 handle_*.py，取不到的项一律标缺口，不补估算值。">
+<title>BTC 指标监控 · 日线指标</title>
+<meta name="description" content="恐慌贪婪指数与 AHR999、CBBI、CVDD、EMA、EMA_new、KDJ、Look Into Bitcoin、MACD、MVRV、NUPL、SOPR Z-Score、Two Year Multiply 的日线读数面板：数值、判定、迷你历史与上游来源时龄。口径抄自 cryptoTrader 的各 handle_*.py，取不到的项一律标缺口，不补估算值。">
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="common.css">
 <script>try{document.documentElement.dataset.theme=localStorage.getItem("board-theme")||"dark"}catch(e){}</script>
 <style>
-  /* 本页特有版式：12 张指标卡 + 口径表 */
+  /* 本页特有版式：指标卡网格 + 口径表 */
   .icard{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:15px 16px 13px;position:relative}
   .icard:hover{border-color:var(--line2)}
   .icard.t-red{border-color:rgba(242,85,90,.45)}
@@ -82,14 +82,14 @@
     <div class="brand"><b><a href="../Index.html">Lattice</a></b><span>BTC Metrics Desk</span></div>
     <nav class="tabs" id="tabs" aria-label="看板导航"></nav>
     <div class="asof num" id="asof"></div>
-    <div class="lbar"><button class="rf" id="rf" type="button">↻ 刷新</button><button class="rf" id="rff" type="button" title="跳过服务端缓存，直接打上游重取这 12 项">⤳ 穿透缓存重取</button><span class="ls" id="livestat">取数中…</span></div>
+    <div class="lbar"><button class="rf" id="rf" type="button">↻ 刷新</button><button class="rf" id="rff" type="button" title="跳过服务端缓存，直接打上游重取全部指标">⤳ 穿透缓存重取</button><span class="ls" id="livestat">取数中…</span></div>
   </div>
 </header>
 
 <div class="wrap">
 
   <section id="top">
-    <div class="shead"><h2>本轮取数</h2><span class="tagline">12 项一次汇总（<span class="num">/api/btc/summary</span>）· 每项各自缓存、互不牵连：一个源挂了只有那一张卡变虚线框</span><div class="rule"></div></div>
+    <div class="shead"><h2>本轮取数</h2><span class="tagline">一次汇总（<span class="num">/api/btc/summary</span>）· 每项各自缓存、互不牵连：一个源挂了只有那一张卡变虚线框</span><div class="rule"></div></div>
     <div class="duo">
       <div class="panel">
         <h3>现价与日线<span class="cadb" id="top-badge" style="margin-top:0">○ 待取数</span></h3>
@@ -114,7 +114,7 @@
   </section>
 
   <section id="cards" style="margin-top:26px">
-    <div class="shead"><h2>12 项日线指标</h2><span class="tagline">顺序与 <span class="num">api/btc.py</span> 的 INDICATORS 表一致 · 放大：点每张卡右上角的<b>「⤢ 放大」</b>或直接<b>双击卡片任意位置</b>，放大图上悬浮任意点看该点日期与数值（键盘：卡片聚焦后 Enter，Esc 收起）</span><div class="rule"></div></div>
+    <div class="shead"><h2 id="cards-title">日线指标</h2><span class="tagline">顺序与 <span class="num">api/btc.py</span> 的 INDICATORS 表一致 · 放大：点每张卡右上角的<b>「⤢ 放大」</b>或直接<b>双击卡片任意位置</b>，放大图上悬浮任意点看该点日期与数值（键盘：卡片聚焦后 Enter，Esc 收起）</span><div class="rule"></div></div>
     <div class="grid" id="grid"><div class="ph" style="font-size:12px;color:var(--tx3)">等待首轮取数…</div></div>
   </section>
 
@@ -124,10 +124,10 @@
   </section>
 
   <section id="gaps" style="margin-top:26px">
-    <div class="shead"><h2>已知缺口（宁缺毋假）</h2><span class="tagline">2026-09-23 实测上游状态；这几项本页<b>不给数也不估</b></span><div class="rule"></div></div>
+    <div class="shead"><h2>已知缺口（宁缺毋假）</h2><span class="tagline">2026-09-23 实测上游状态；这几项本页<b>不给数也不估</b>（AHR999 那条已补上，原文留作修订记录）</span><div class="rule"></div></div>
     <div class="panel">
       <ul class="gaplist" style="margin:0;padding:0">
-        <li><b>AHR999</b>：三个上游现在全不通（2026-09-23 逐条实测）—— <b>coinsoto</b>（<span class="num">handle_AHR999.py</span> 用的就是这个表）走代理时 TLS 握手即被断开、换直连则 20s 超时，<span class="num">api.coinsoto.com</span> 与 <span class="num">coinsoto.com/api</span> 两条变体同样不通；<b>soulbab</b> 回 530，正文是 Cloudflare 1016「源站 DNS 解析不到」，域名已经不存在了；<b>CoinGlass</b> 的 <span class="num">/api/index/ahr999</span> 端点确实存在、鉴权头 <span class="num">CG-API-KEY</span> 也认这个 Key，但回 <span class="num">Upgrade plan</span>——免费套餐不含该指标。同一把 Key 在 CryptoQuant 上也是整体 403（连 hash-rate 都要 Professional 档），站内 <span class="num">capi.coinglass.com</span> 对任何路径都回一句空 <span class="num">success</span>，looknode 没有 <span class="num">/api/ahr999</span>。本模块<b>不自己造 AHR999 公式</b>（<span class="num">api/Crypto/handle_AHR999.py</span> 里也没有可核对的口径——它只是一句 <span class="num">requests.get</span> 取现成表格，从没算过），拍脑袋算出来会被当成抄底/逃顶信号，所以这张卡宁可空着。哪天 CoinGlass 套餐升上来、环境里设了 <span class="num">COINGLASS_KEY</span>，这条 Key 版路径就会自动出数（仓库、config.ini、上传包里都不放密钥）。</li>
+        <li><b>AHR999</b>（<b>已补上，这条现在是修订记录</b>）：本页现在取 <span class="num">looknode.com/api/Ahr999</span>，就是那张图的原始序列（5700+ 个点、当天更新），与 MVRV/CVDD 走同一条 <span class="num">looknode()</span> 通路。<b>当时为什么会记成「取不到」：这条路径大小写敏感</b>，2026-09-23 实测试的是全小写 <span class="num">/api/ahr999</span>，拿到 404 就下结论说 looknode 没有这个接口，而页面 slug 其实是大写 A 的 <span class="num">Ahr999</span>。原先那三条依然是死的，留在链后面兜底，死法照旧记着：<b>coinsoto</b>（<span class="num">handle_AHR999.py</span> 用的就是这个表）走代理时 TLS 握手即被断开、换直连则 20s 超时，<span class="num">api.coinsoto.com</span> 与 <span class="num">coinsoto.com/api</span> 两条变体同样不通；<b>soulbab</b> 回 530，正文是 Cloudflare 1016「源站 DNS 解析不到」，域名已经不存在了；<b>CoinGlass</b> 的 <span class="num">/api/index/ahr999</span> 端点确实存在、鉴权头 <span class="num">CG-API-KEY</span> 也认这个 Key，但回 <span class="num">Upgrade plan</span>——免费套餐不含该指标（哪天套餐升上来、环境里设了 <span class="num">COINGLASS_KEY</span>，这条 Key 版路径就会自动出数；仓库、config.ini、上传包里都不放密钥）。口径没变：本页<b>依然不自己造 AHR999 公式</b>（<span class="num">api/Crypto/handle_AHR999.py</span> 里也没有可核对的口径——它只是一句 <span class="num">requests.get</span> 取现成表格，从没算过），取的是上游算好的数值。唯一少的一项：coinsoto 那个「200 日定投成本」Looknode 不提供，卡片上这一行是空号，不拿序列均值去顶替它。</li>
         <li><b>Look Into Bitcoin 盈利币占比</b>：<span class="num">production.lookintobitcoin.com</span> 自 2024 年起 502 废弃（见 <span class="num">api/Crypto/handle_LookIntoBitcoin.py</span> 与 <span class="num">cryptoTrader/docs/api_url:141-145</span>），本机出口现在连域名都被代理直接拒掉；替代是 BM Pro 付费订阅。这一格保留着，通不通全看它有没有临时恢复。</li>
         <li><b>SOPR Z-Score</b>：口径是「对可用的 Z 分量取均值」，而 <span class="num">charts.bitbo.io</span> 的 <span class="num">mvrv-z</span> 与 <span class="num">sopr</span> 两个接口现在都回 401，只剩 <span class="num">nupl_z</span>（由 Looknode MVRV 现算）这一个分量。所以现在这格 ≈ nupl_z，与名字里的 SOPR 已经脱钩——卡片明细里按分量构成如实标注，不改名也不补数。</li>
         <li><b>CBBI 合成分</b>：由上游服务端算（9 个子指标等权），本页只做 0~1 → 0~100 的换算，<b>不重算合成分</b>；9 个子指标的最新读数列在明细里，可以自己核对。</li>
@@ -145,6 +145,10 @@
         <a href="https://colintalkscrypto.com/cbbi/data/latest.json" target="_blank" rel="noreferrer">colintalkscrypto.com · CBBI latest.json</a>
         <a href="https://www.looknode.com/api/mCapRealizedRatio" target="_blank" rel="noreferrer">looknode.com · MVRV（NUPL 由它推算）</a>
         <a href="https://www.looknode.com/api/CVDD" target="_blank" rel="noreferrer">looknode.com · CVDD</a>
+        <a href="https://www.looknode.com/api/Ahr999" target="_blank" rel="noreferrer">looknode.com · AHR999（本页取它，路径大小写敏感）</a>
+        <a href="https://www.looknode.com/zh/chart/Ahr999/" target="_blank" rel="noreferrer">looknode.com · AHR999 原图页</a>
+        <a href="https://www.looknode.com/api/twoYearMultiply" target="_blank" rel="noreferrer">looknode.com · 2年MA乘数通道（v1/v2 两条线）</a>
+        <a href="https://www.looknode.com/zh/chart/twoYearMultiply/" target="_blank" rel="noreferrer">looknode.com · 2年MA乘数 原图页（判据原文在它的「指标描述」）</a>
         <a href="https://api.kraken.com/0/public/OHLC?pair=XBTUSD&amp;interval=1440" target="_blank" rel="noreferrer">Kraken OHLC · 日线（721 根）</a>
         <a href="https://www.okx.com/api/v5/market/candles?instId=BTC-USDT&amp;bar=1D&amp;limit=300" target="_blank" rel="noreferrer">OKX candles · 日线</a>
         <a href="https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=86400" target="_blank" rel="noreferrer">Coinbase candles · 日线</a>
@@ -156,7 +160,7 @@
         <a href="../Index.html">← 回看板主页</a>
       </div>
       <div class="note">同源中转链路：本页 → <span class="num">/api/btc/summary</span> →（出口代理取 <span class="num">config.ini [proxy]</span>）→ 上述上游。服务没起来时整页显示不可达，不会留半截旧数在页面上。</div>
-      <div class="note">入库（可选旁路，卡片上的 <span class="num">⌗ 入库</span> 标就是这件事）：12 项日读数一律写 <span class="num">board_indicator_daily</span>，<b>取数失败也写一行</b>（value 为空、error 记原因），带历史的卡再把整条序列写 <span class="num">board_series_daily</span>（键 <span class="num">btc:&lt;key&gt;</span>）；同日覆盖、值没变就不打库。开关与口令在 <span class="num">[mysql]</span>（优先 <span class="num">local.ini</span>／环境变量），建表 <span class="num">python api/db.py --init</span>，状态看 <span class="num">/api/db/health</span>；没装 pymysql 或库不通时这一路整体空转，页面照常有数。</div>
+      <div class="note">入库（可选旁路，卡片上的 <span class="num">⌗ 入库</span> 标就是这件事）：各项日读数一律写 <span class="num">board_indicator_daily</span>，<b>取数失败也写一行</b>（value 为空、error 记原因），带历史的卡再把整条序列写 <span class="num">board_series_daily</span>（键 <span class="num">btc:&lt;key&gt;</span>）；同日覆盖、值没变就不打库。开关与口令在 <span class="num">[mysql]</span>（优先 <span class="num">local.ini</span>／环境变量），建表 <span class="num">python api/db.py --init</span>，状态看 <span class="num">/api/db/health</span>；没装 pymysql 或库不通时这一路整体空转，页面照常有数。</div>
     </div>
   </section>
 
@@ -182,7 +186,7 @@
 
 <script src="common.js"></script>
 <script>
-/* 12 张卡片全部由 /api/btc/summary 的 items 驱动，页面不内置任何数值 */
+/* 卡片全部由 /api/btc/summary 的 items 驱动，页面不内置任何数值，也不写死项数 */
 const TONE = { red: "red", green: "green", gray: "", bad: "bad" };
 let DATA = null, liveTimer = null;
 /* 上游错误文本会直接进 innerHTML（short_err 截断后仍可能带尖括号），一律先转义 */
@@ -379,6 +383,7 @@ function oneLine(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').tri
 function paint() {
   topPaint();
   const items = (DATA && DATA.items) || [];
+  $('cards-title').textContent = items.length ? items.length + ' 项日线指标' : '日线指标';
   if (!items.length) {
     const why = oneLine((DATA && (DATA.error || DATA.message)) || '响应里没有 items —— 服务未启动或不可达？');
     $('grid').innerHTML = `<div class="note bad" style="grid-column:1/-1">取数服务没有返回任何指标：${esc(why)}</div>`;
@@ -419,7 +424,7 @@ async function load(force) {
     setStatus('livestat', DATA.ok ? `在线 · ${DATA.count.ok}/${DATA.count.total} 项有数` : '全部指标取数失败', DATA.ok ? 'ok' : 'bad');
   } catch (e) {
     const why = e.name === 'AbortError' ? '超时（>150s）已中断等待' : (e.message || e);
-    DATA = { ok: false, items: [], error: String(why), count: { total: 12, ok: 0, failed: 12 } };
+    DATA = { ok: false, items: [], error: String(why), count: { total: 0, ok: 0, failed: 0 } };
     setStatus('livestat', `不可达：${why}`, 'bad');
   } finally { clearTimeout(liveTimer); }
   paint();
@@ -428,7 +433,7 @@ async function load(force) {
 /* 口径表：与 api/btc.py 的注释同源，行号指向 cryptoTrader（那个项目只读参考，本页不改它） */
 const RULES = [
   ['恐慌贪婪指数', 'alternative.me 日线序列，原值 0~100', '≤24 极度恐慌（抄底窗口）· 25~49 恐慌 · 50~74 贪婪 · ≥75 极度贪婪', 'handle_fear.py:104'],
-  ['AHR999 定投指数', '取上游现成数值（本页不自算公式）', '&lt;0.45 抄底区 · 0.45~2 中性 · ≥2 顶部危险', 'handle_AHR999.py:33 / operationConfig.py:213,328'],
+  ['AHR999 定投指数', 'Looknode 现成序列的最后一个点（本页不自算公式）', '&lt;0.45 抄底区 · 0.45~2 中性 · ≥2 顶部危险', 'handle_AHR999.py:33 / operationConfig.py:213,328'],
   ['CBBI 牛熊信心指数', 'latest.json 的 Confidence ×100（0~1 刻度换算）', '≤35 底部区（≤20 最硬）· 35~80 中性 · ≥80 顶部区', 'handle_CBBI.py:61-93 / operationConfig.py:214,327'],
   ['CVDD 累计价值币天销毁', 'Looknode 现值，与本页同一 K 线源的收盘比对', '现价 ≤ CVDD×1.05 → 历史底部支撑区', 'handle_CVDD.py:123-151 / operationConfig.py:218'],
   ['EMA5/EMA10', 'k=2/(n+1)，第 n−1 根用 SMA 播种，之前填当根收盘', '本根上穿=金叉 · 下穿=死叉 · 否则看快线上下', 'handle_EMA.py:74-87,106'],
@@ -439,6 +444,7 @@ const RULES = [
   ['MVRV', 'Looknode 市值/实现市值，原值倍数', '≤1.0 全网浮亏（底部区）· 顶部无口径故不设', 'handle_MVRV.py:28-32 / operationConfig.py:215'],
   ['NUPL', 'NUPL = 1 − 1/MVRV（Looknode 免费推算路径）', '>0.75 极度贪婪 · 0.5~0.75 乐观 · 0.25~0.5 中性 · 0~0.25 焦虑 · −0.25~0 绝望 · &lt;−0.25 极度绝望', 'handle_NUPL.py:17-24,287'],
   ['SOPR Z-Score', 'z=(末值−均值)/总体std，窗口 365 天；取可用分量的算术均值', 'z &lt; −0.44 底部区域 · z > 0.73 顶部区域', 'handle_SOPR_Z-Score.py:55-58,76-87,284-290,360-367'],
+  ['2年MA乘数通道', 'Looknode 通道原值：下沿 730MA（美元，头条就是它），上沿 730MA×5；现价借本页同一 K 线源收盘，与 CVDD 卡同构', '现价 &lt; 730MA 过度悲观区 · 现价 > 730MA×5 过度贪婪区 · 通道内中性', 'looknode.com/zh/chart/twoYearMultiply（上游页面的「指标描述」原文，cryptoTrader 里没有这条）'],
 ];
 $('rules-body').innerHTML = RULES.map(r =>
   `<div class="kv"><span><i>${r[0]}</i><br><span style="font-size:11px;color:var(--tx3)">${r[1]}</span><br><span style="font-size:11px;color:var(--tx2)">判定：${r[2]}</span></span><b>${r[3]}</b></div>`).join('');
