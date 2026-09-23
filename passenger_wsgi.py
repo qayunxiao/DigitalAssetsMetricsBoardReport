@@ -59,6 +59,12 @@ os.environ["HTTP_PROXY"] = ""
 
 if ROOT:
     try:
+        # 两条都要：api/ 让 `import app`/`import core` 找得到模块（api/*.py 之间是平铺互相 import），
+        # ROOT 让 `from api import xxx` 这种包路径找得到——本地版由解释器自动把项目根塞进 sys.path[0]
+        # 所以感觉不到，Passenger 的 app root 常在 public_python 那层，少了这里就是 ModuleNotFoundError: api。
+        # 根这一条排到最后而不是插到 0：站点根上还有 utils/、main.py 这些同名目录/文件，抢到最前会去遮掉第三方包。
+        if ROOT not in sys.path:
+            sys.path.append(ROOT)
         sys.path.insert(0, os.path.join(ROOT, "api"))
         import app                                          # noqa: E402
         import core                                         # noqa: E402

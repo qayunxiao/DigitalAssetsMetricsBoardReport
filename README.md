@@ -181,7 +181,9 @@ serv00 的 python 站点类型 = Phusion Passenger **WSGI**：面板用「Interp
 `import` 站点目录里的 `passenger_wsgi.py`，取模块级 `application` 处理请求。它**不允许**自启端口监听、
 常驻守护或后台线程，所以本机版的 `ThreadingHTTPServer` 在那儿跑不起来 —— 公网入口因此是 `passenger_wsgi.py`，
 它做四件事：设 `PUBLIC=1`、清掉代理环境变量、`_find_root()` 定位项目根（从自身位置向上探 4 层、再向下探
-`public`/`public_python`/`public_html`/`www`，判据是「这层下面有 `api/app.py`」，`BOARD_ROOT` 可强制指定）、
+`public`/`public_python`/`public_html`/`www`，判据是「这层下面有 `api/app.py`」，`BOARD_ROOT` 可强制指定；serv00 实测 Passenger 的 app root 在 `public_python`，探到的真根是外层 `~/domains/<域名>`）、
+把 `<根>` 和 `<根>/api` 两条都交给 `sys.path`（`api/` 用来 `import app`/`core`，根用来满足 `api/*.py` 里的 `from api import xxx` 包路径；
+只给 `api/` 那一条就在装配时报 `ModuleNotFoundError: No module named 'api'`——本机版跑 `main.py` 时解释器自动把项目根放进 `sys.path[0]`，所以这条只在服务器上暴露）；
 装配路由后交出 `core.wsgi_app`。**没有「启动服务」这一步**：请求进来时 Passenger 才 import，空闲后自己退出，
 改完代码 `touch tmp/restart.txt` 重载即可。2026-09-22 已实测跑通（`http://myaibtc.serv00.net/` 出首页，
 `运行时 python 3.11.13 · 代理 (未配置) · config.ini 已加载`）。
