@@ -54,6 +54,7 @@ DigitalAssetsMetricsBoard/
 │   ├── liquidity.py           /api/liquidity/*   ├── crash.py      /api/crash/*
 │   ├── allocation.py          /api/allocation/*（资产配置页的取数全在这一个文件里，没有同名目录）
 │   ├── db.py                  可选落库层（MySQL 旁路 + `/api/db/health`）：建表、写入、状态自检
+│   ├── notify.py              Telegram 推送出口（`QA` / `ALVIN` 两个机器人，令牌读 `config.ini` 的 `[TG]`，见第 4 节；**没有任何 HTTP 接口调它**，BTC 极值播报走 `--btc` 命令行）
 │   ├── Liquidity/             流动性模块详档（README.md 接口契约/阈值表、Qoder.md 审计纪律）与 _legacy/ 归档
 │   └── USStockCrashMonitor/   原 Streamlit 版归档（_legacy/，README.md 为旧版说明）
 ├── utils/                     cryptoTrader `utils/` 的仓库内只读副本（含 `operationMysql.py`），对照用、不参与 import，见 7.3
@@ -61,6 +62,7 @@ DigitalAssetsMetricsBoard/
 ├── INTODB.md                  落库地图：哪些指标真入库、哪些只存元数据、哪些完全不落库、哪些走日缓存
 ├── data/risk_history.csv      崩盘页每日评分累积（同日覆盖）
 ├── data/report_quota.json     两个持仓报告的当日点击计数（crypto/us 各记各的，跨天自动作废，限次见 [report]）
+├── data/notify_state.json     TG 播报的去重与每日限额记录（`api/notify.py`，见第 4 节；只留最近一条，删掉等于「今天没发过」）
 ├── data/daycache/             磁盘日缓存：每个缓存键一份「今天取到的原始结果」（见 7.4，可整目录删除）
 ├── logs/board_server.log      午夜轮转，保留 14 天
 └── Qoder.md                   给 agent 的项目约定（审计提示词、硬性纪律、边界）
@@ -93,16 +95,45 @@ DigitalAssetsMetricsBoard/
 |---|---|---|---|
 | `[proxy]` | `http` / `https` | `HTTP_PROXY` / `HTTPS_PROXY` | `http://127.0.0.1:3067`；留空 = 不走代理。**只在 Windows 生效**：`apply_config()` 在非 `nt` 系统直接跳过本段（同一份文件传到 FreeBSD/Linux 服务器上并不存在那个出口），Unix 要用代理必须显式给环境变量 |
 | `[server]` | `port` | `PORT` | `8888`；监听地址固定 `127.0.0.1`，**故意不做成配置项**（只对本机版 `main.py` 有意义，公网版没有监听端口这回事）。页面与 `/api/*` 同源共用这一个端口，**没有第二个「前端端口」**：浏览器经 15888 访问是你自己的反向代理／端口映射（15888 → 127.0.0.1:8888）在转发，本项目不参与、也不因它放开绑定 |
-| `[server]` | `public` | `PUBLIC` | 留空 = 本机版。`1` = 公网版（静态只放 html/css/js/svg/ico、持仓报告整段不出现、`report` 路由不注册）。公网版由 `passenger_wsgi.py` 在导入核心层前写死，服务器上不必改本文件 |
+| `[server]` | `public` | `PUBLIC` | 留空 = 本机版。`1` = 公网版（静态只放 html/css/js/svg/ico、不走本机代理）。**持仓报告在两个版本里同一口径**（按钮都显示、点了就执行，2026-09-22 改过两次后的最终结论），不再有「公网版整段不出现」那回事。公网版由 `passenger_wsgi.py` 在导入核心层前写死，服务器上不必改本文件 |
 | `[log]` | `dir` / `level` | `LOG_DIR` / `LOG_LEVEL` | `logs`（相对项目根）/ `INFO`（DEBUG 含缓存命中明细，每日轮转留 14 天） |
 | `[page]` | `show_fix` | `SHOW_FIX` | `1`；控制页面底部「修订记录」块，由服务端替换 HTML 标记 `{{SHOW_FIX}}` 实现，一次刷新即生效 |
 | `[report]` | `python` / `crypto_script` / `us_script` / `daily_limit` / `us_daily_limit` | `REPORT_PY`（两个 kind 共用解释器）/ `REPORT_CRYPTO_SCRIPT` / `REPORT_US_SCRIPT` / `REPORT_DAILY_LIMIT` / `REPORT_US_DAILY_LIMIT` | 覆盖两个报告脚本的路径（留空 = 按 OS 用内置默认）与各自每天可点次数（默认加密 `3`、美股 `2`）。本机 `python` 已填 cryptoTrader 自己的 venv（`E:/UserTools/py311_envs/WEB3/Scripts/python.exe`，含 openpyxl/pandas/requests；系统 python 缺 openpyxl，用它跑加密报表只会得到「无数据」） |
 | `[cache]` | `day` / `dir` | `CACHE_DAY` / `CACHE_DIR` | 磁盘日缓存（`api/core.py` 的 `cached()`）。`day=0` 整层关掉 = 回到「缓存只在进程内存里」的老行为；`dir` 相对项目根（`data/daycache`，已 gitignore，删掉无后果）。为什么要有这层见 7.4 |
 | `[mysql]` | `ENABLE` / `HOST` / `PORT` / `USER` / `PASSWD` / `DADABASES` / `CHARSET` / `STORE_BTC` / `STORE_SERIES` / `STORE_RISK` / `STORE_REPORT` | `MYSQL_HOST` / `MYSQL_PORT` / `MYSQL_USER` / `MYSQL_PASSWD` / `MYSQL_DATABASE` / `MYSQL_CHARSET` / `MYSQL_ENABLE` / `MYSQL_STORE_BTC` / `MYSQL_STORE_SERIES` / `MYSQL_STORE_RISK` / `MYSQL_STORE_REPORT` | **整段可选的落库层**，见 7.3。`ENABLE=0` 或 `HOST/USER/DADABASES/PASSWD` 任缺其一 = 完全不连库，页面照常有数。键名 `DADABASES` 是出处项目（cryptoTrader）的原始拼写，保留兼容。四个 `STORE_*` 分别关掉「指标日读数 / 历史序列 / 崩盘评分 / 报表留痕」，都只在 `ENABLE=1` 时有效 |
+| `[dingding]` | `SECRET` / `ACCESS_TOKEN` / `SECRET_MYSELF` / `ACCESS_TOKEN_MYSELF` / `SECRET_QA` / `ACCESS_TOKEN_QA` | `DD_SECRET` / `DD_ACCESS_TOKEN` / `DD_SECRET_MYSELF` / `DD_ACCESS_TOKEN_MYSELF` / `DD_SECRET_QA` / `DD_ACCESS_TOKEN_QA` | 三组钉钉机器人（默认 / 我自己 / QA）的加签密钥与 webhook token。2026-09-24 从 `indicator.ini` 挪进来，**当前只有读取路径，没有代码真发钉钉**（保留出处项目的键名与拼写，接上时不必再搬一次） |
+| `[TG]` | `BOT_TOKEN_QA` / `CHAT_ID_QA` / `BOT_TOKEN_ALVIN` / `CHAT_ID_ALVIN` | `TG_BOT_TOKEN_QA` / `TG_CHAT_ID_QA` / `TG_BOT_TOKEN_ALVIN` / `TG_CHAT_ID_ALVIN` | 两个 Telegram 机器人，`api/notify.py` 读的就是这一段（`QA` / `ALVIN`）。⚠ **明文口令/令牌，见下面那段**：这批值此刻在公开的 `origin/main` 里，也随 `deploy_app.sh` 上到公网机器 |
+| `[notify]` | `tg_bot` / `daily_limit` | `NOTIFY_TG_BOT` / `NOTIFY_DAILY_LIMIT` | BTC 极值播报（`api/notify.py --btc`）的两个运行参数：默认发给哪个机器人（`QA`）、每天最多几条（`1`）。**看哪几张卡、什么档算触发不在这里**——那是判级口径，写在 `api/notify.py` 的 `BTC_WATCH` / `HOT_TONES`，改它要提交代码。状态记在 `data/notify_state.json`（已 gitignore，删掉等于「今天还没发过」） |
 
 新增配置项需同时登记 `api/core.py` 的 `CONFIG_ENV`、`config.ini` 注释与本表。**例外：`[mysql]` 走 `api/db.py` 自己的解析（环境变量 > `local.ini` > `config.ini`），不进 `CONFIG_ENV`**——它要在缺 `pymysql` 时也照常启动，不能让 core 去 import 一个第三方包。
 
-**凭据的去处**：本文件的规矩是「运行参数可以入库，口令不行」，因为 `config.ini` 是 git 跟踪文件、`deploy_app.sh` 又按 `git ls-files` 打上传包，写进去等于把口令发到公开仓库和公网机器上。所以 `PASSWD` 长期应放 `local.ini`（已 gitignore，`api/db.py` 优先读它）或 `set MYSQL_PASSWD=…`，`config.ini` 里那行只在提交前清空。`COINGLASS_KEY` 从一开始就是纯环境变量（故意不进 `CONFIG_ENV`，也不写任何 ini）。2026-09-23 曾把整段 `[mysql]` 挪进 `local.ini`，同日按用户要求挪回 `config.ini` 并保留 `local.ini`/环境变量两级覆盖——**口令进 git 历史之前请先 `PASSWD =` 留空**（挪之前那几天它未进过任何提交，无需轮换）。
+**Telegram 推送怎么用（`api/notify.py`）**：这是个独立脚本，**没有挂到任何 HTTP 路由上**，页面上按不到它，所以不存在「刷新页面就把消息发出去」这种事故。
+
+```bash
+python api/notify.py                                   # 只自检：两个机器人各问一次 getMe（只读，问 bot 自己是谁），不发任何消息
+python api/notify.py --text "测试正文"                  # 同上，外加把这条正文打印出来预览，仍不发
+python api/notify.py --send --bot QA --text "测试正文"   # 真发一条到 QA 那个群（--send 必须搭配 --bot，否则拒绝并退码 2）
+python api/notify.py --status                           # 纯本地：上一单发给谁/哪天/第几条 + 今日额度，不打网络也不打库
+python api/notify.py --btc                              # BTC 极值播报：取数 → 挑卡 → 组正文 → 报会不会被闸门挡；**不发**
+python api/notify.py --btc --send                       # 真发（机器人取 `--bot`，没给就用 `[notify] tg_bot`）
+python api/notify.py --btc --send --force               # 连过两道闸门（同一业务日已发过时手工补发）
+```
+
+**`--btc` 的触发口径**（2026-09-24 定，策略常量在 `api/notify.py` 里，运行参数在 `[notify]`）：
+
+| 环节 | 口径 |
+|---|---|
+| 看哪几张卡 | `BTC_WATCH = two_year_multiply / fear / ahr999 / cbbi` —— 只有这四张有明确的极值档，其余九张的 `tone` 不代表「极端」 |
+| 什么算触发 | 卡片自己算好的 `tone ∈ {green, red}`（绿=底部档、红=顶部档）。**播报层一律不重算阈值**，判级改了就跟着改，这里不存第二份口径 |
+| 一条 vs 每张 | 一次事件 = 一条消息，命中几张列几张；正文全用卡片现成字段（`name`/`value`+`dp`/`verdict`/`asof`/`src`），末尾一句交代未触发与取数失败 |
+| 没有命中 | **什么都不发**（宁可不发，也不把中性区刷成日常播报） |
+| 闸门一 | 同一 `(机器人, 业务日)` 只发一条。业务日 = 命中项里最新的 `asof`，**不是跑脚本那天**——上游可能整天不更新，用当天当键会让同一条极值在群里刷成一串 |
+| 闸门二 | `[notify] daily_limit`（默认 1）按日历日计数 |
+| 记账时机 | 只在真发成功之后写 `data/notify_state.json`；失败不计数（一次网络抖动不该烧掉当天额度）。预览跑一百遍也不扣 |
+
+发信走 `core.PROXY`（本机），公网机器上 `[proxy]` 被 `win_only` 跳过所以直连。正文不设 `parse_mode`（Markdown/HTML 里一个裸 `_` 或 `<` 就整条 400），超 4096 字按 Telegram 上限截断。**没有定时器**：要每天自动播，自己挂 cron／计划任务跑 `python api/notify.py --btc --send` —— 服务代码里没有一行会自己发（见第 9 节）。`--btc` 走的就是 `btc.summary()`，所以顺带把 13 项读数 UPSERT 进库（7.3），与页面刷新同一语义；`--status` 才是完全不碰外部的自检。
+
+**凭据的去处**：这条规矩在 2026-09-24 被用户**明示改口**过，现在的边界是「**该段口令可以入库，但任何接口/日志/聊天都不许回显**」。原先写的是「运行参数可以入库，口令不行」，因为 `config.ini` 是 git 跟踪文件、`deploy_app.sh` 又按 `git ls-files` 打上传包，写进去等于把口令发到公开仓库和公网机器上——这个后果今天**已经成立**：`[dingding]` `[TG]` 两段明文此刻在公开的 `origin/main` 里，也上了 serv00 那台机器。用户明知这一点仍要求这么做（原话：「确认要把明文密钥写进 config.ini 并提交到公开仓库，之后我BTC 相关指标需要发TG 需要使用到这样的功能」），所以要轮换/收回是他的动作，**后来的 agent 别默默把它改回去、也别不吭声地再往里加新凭据**。`[mysql] PASSWD` 那段的**书面**规矩仍是「优先 `local.ini` 或 `set MYSQL_PASSWD=…`，提交前先 `PASSWD =` 留空」；2026-09-23 曾把整段挪进 `local.ini`，同日按用户要求挪回 `config.ini` 并保留两级覆盖。**但 2026-09-24 核对：这段口令已经在公开的 `origin/main` 里了**（`git show origin/main:config.ini` 能查到那行 `PASSWD`，来自 `63b9101`），所以上一句「提交前清空」对历史已经无效——要么清空后重新提交、要么视同已泄露去轮换，这是他的动作，我们只提示不代执行。`COINGLASS_KEY` 从一开始就是纯环境变量（故意不进 `CONFIG_ENV`，也不写任何 ini），这条没变。另核对一笔：`indicator.ini`（出处项目的凭据快照）**并非**「已 gitignore 所以不在仓库里」——它早在 `63b9101` 就被跟踪，gitignore 只挡未跟踪文件，那批 CoinGlass/CryptoQuant Key、钉钉与 TG 令牌、TradingView 口令一直在远端历史里；要挡住得先 `git rm --cached indicator.ini` 再提交，且必须轮换。
 
 ## 5. 接口契约（/api/*）
 
@@ -112,12 +143,16 @@ DigitalAssetsMetricsBoard/
 | 端点 | 说明 |
 |---|---|
 | `summary[?force=1]` | 全部指标一次给齐：**缓存打在每一项上，没有整页缓存**，`force=1` 穿透全部上游（首屏约 8~12 秒，之后命中各自 TTL）。响应：`items[]` + `count{total,ok,failed}` + `order` + `live_age` + `hist_points`（迷你图抽样目标点数，实际每卡条数在它附近）+ `spot`/`kline_from`/`asof`（日线现价与最后一根已收盘）+ `failed[]`（缺位项及其上游原因）。只要有一项有数就回 200，全挂回 502 |
-| `one?k=<指标>&force=1` | 单卡重取（卡片上的「重试」按钮）。`k` 白名单就是 `INDICATORS` 的键（`btc.py` 里加一张卡即自动进名单，当前为 `fear ahr999 cbbi cvdd ema ema_new kdj litb macd mvrv nupl sopr two_year_multiply`），其余 400 |
+| `one?k=<指标>&force=1` | 单卡重取（卡片上的「重试」按钮）。`k` 白名单就是 `INDICATORS` 的键（`btc.py` 里加一张卡即自动进名单，当前为 `fear ahr999 two_year_multiply cbbi ema_new kdj cvdd ema litb macd mvrv nupl sopr`），其余 400。**这张表同时就是页面的卡片顺序**（`pool.map` 保序返回、页面照 `items[]` 原样铺卡，所以前端不再存一份顺序）；卡片区每行两张由 `staic/btc.html` 里的 `#grid{grid-template-columns:repeat(2,...)}` 决定（窄屏退回一列，覆盖的是 `common.css` 的共享 `.grid`，不影响流动性页与崩盘页） |
 | `health` | 模块探活（纯自述，不打上游）：`indicators` / `sources` / `live_age` / `hist_points` |
 
-每张卡的统一形状：`{key,name,unit,dp,value,text,tone,verdict,asof,src,hist[],extras[],note,ok,store}`，`tone` 只有 `red`（顶部/空头）·`green`（底部/多头）·`gray`（中性或上游没给阈值）·`bad`（取不到）四种，页面不做综合评分。`store` 是**这张卡的落库标识**（`daily` / `daily+hist` / 空 = 不落库，卡片右上角显示成「⌗ 入库」小标）：各项一律落「日读数」，**取数失败的那张也写一行**（`value=NULL` + `error` 有值），这样库里能区分「那天没数」和「那天没跑」；只有真带 `hist[]` 序列的卡才多落一份 `daily+hist`。上游清单与 TTL：日 K 线 `binance→kraken→okx→coinbase→bybit`（900s，各家解析后统一为「已收盘」日线收盘，当天那根剔除）、`alternative.me/fng`（900s）、`colintalkscrypto.com/cbbi`（3600s，合成分由上游服务端算，本页只做 0~1→0~100）、`looknode.com`（3600s，MVRV、CVDD、AHR999 与 2年MA乘数通道，NUPL 由 MVRV 推算；`twoYearMultiply` 回的是 `v1`/`v2` 两条线，走 `looknode_band()` 解析，`v1 ≡ 5×v2`）、`ahr999`（3600s，首选 looknode `/api/Ahr999`，其后 coinsoto→soulbab→可选 CoinGlass）、`production.lookintobitcoin.com`（3600s）。**除 CoinGlass 外全部公开无密钥**：环境里设了 `COINGLASS_KEY` 才会多试那条 Key 版路径（鉴权头 `CG-API-KEY`），密钥不进仓库、不进 `config.ini`、不进上传包——目前这条路径回 `Upgrade plan`，要套餐里有该指标才出数。取不到的项一律以 `tone:"bad"` 的虚线卡片显示原因，页面「已知缺口（宁缺毋假）」块列全，不补估算值（AHR999 尤其：`api/Crypto/handle_AHR999.py` 自己也只是 `requests.get` 取现成表格、没有任何公式，本模块拒绝发明公式）。
+每张卡的统一形状：`{key,name,unit,dp,value,text,tone,verdict,asof,src,hist[],extras[],note,ok,store}`，通道卡（`two_year_multiply`）额外多一个 `bands[]`（见下）。`tone` 只有 `red`（顶部/空头）·`green`（底部/多头）·`gray`（中性或上游没给阈值）·`bad`（取不到）四种，页面不做综合评分。`store` 是**这张卡的落库标识**（`daily` / `daily+hist` / 空 = 不落库，卡片右上角显示成「⌗ 入库」小标）：各项一律落「日读数」，**取数失败的那张也写一行**（`value=NULL` + `error` 有值），这样库里能区分「那天没数」和「那天没跑」；只有真带 `hist[]` 序列的卡才多落一份 `daily+hist`。上游清单与 TTL：日 K 线 `binance→kraken→okx→coinbase→bybit`（900s，各家解析后统一为「已收盘」日线收盘，当天那根剔除）、`alternative.me/fng`（900s）、`colintalkscrypto.com/cbbi`（3600s，合成分由上游服务端算，本页只做 0~1→0~100）、`looknode.com`（3600s，MVRV、CVDD、AHR999 与 2年MA乘数通道，NUPL 由 MVRV 推算；`twoYearMultiply` 回的是 `v1`/`v2` 两条线，走 `looknode_band()` 解析，`v1 ≡ 5×v2`）、`finance.yahoo.com` 图表接口（21600s = 6h，`BTC-USD` 的 `20y` 日线收盘，实测 4390 根、2014-09-17 起，**只服务通道卡放大图那条黄色现价线**，`api/btc.py` 的 `btc_closes()`）、`ahr999`（3600s，首选 looknode `/api/Ahr999`，其后 coinsoto→soulbab→可选 CoinGlass）、`production.lookintobitcoin.com`（3600s）。**除 CoinGlass 外全部公开无密钥**：环境里设了 `COINGLASS_KEY` 才会多试那条 Key 版路径（鉴权头 `CG-API-KEY`），密钥不进仓库、不进 `config.ini`、不进上传包——目前这条路径回 `Upgrade plan`，要套餐里有该指标才出数。取不到的项一律以 `tone:"bad"` 的虚线卡片显示原因，页面「已知缺口（宁缺毋假）」块列全，不补估算值（AHR999 尤其：`api/Crypto/handle_AHR999.py` 自己也只是 `requests.get` 取现成表格、没有任何公式，本模块拒绝发明公式）。
 
-**卡片放大（纯前端，不多打一次上游）**：`staic/btc.html` 放大入口有三个，**卡片右上角的「⤢ 放大」按钮是看得见的那个**（另有双击卡片任意位置、Tab 到卡片按 Enter；Esc / 点遮罩空白 / ✕ 收起），弹出大图，用的就是卡片刻度图那串点，只是把 `common.js` 的 `lineChart` 画到 960×320。横轴只标得出首/中/末三个日期，所以放大图带**悬浮读数**：鼠标移到曲线上（触屏点一下）按 x 找最近的那个点，画虚线十字线 + 高亮点，气泡显示该点「日期 · 数值」，落在画框外的点会把气泡拉回框内。**悬浮层只挂在 `#z-chart` 容器上，`lineChart` 一行没改**——崩盘页那四张图共用它，而那一页打开即写一条当日评分，不值得为这点交互去动共享层。MVRV 这类倍数值在 2010 年有一个极端点（实测 2010-07-19 的 45.92），按全域画整条线会被压成一条平线，所以放大图只在「2%~98% 分位那一段不足全域 1/4」时按分位截断纵轴，并在弹层里写明真实全域与被裁到尺度外的点数——**数据一条没删，只是纵轴不再被单点绑架**；卡片刻度图仍按全域画，不走这个截断。
+**卡片放大（点开不另发请求）**：`staic/btc.html` 放大入口有三个，**卡片右上角的「⤢ 放大」按钮是看得见的那个**（另有双击卡片任意位置、Tab 到卡片按 Enter；Esc / 点遮罩空白 / ✕ 收起），弹出大图，用的就是这一张卡在 `summary` 里已经拿到的那串点，只是把 `common.js` 的 `lineChart` 画到 960×320。横轴只标得出首/中/末三个日期，所以放大图带**悬浮读数**：鼠标移到曲线上（触屏点一下）按 x 找最近的那个点，画虚线十字线 + 高亮点，气泡显示该点「日期 · 数值」，落在画框外的点会把气泡拉回框内。几何一律用 `lineChart` 这次**回传**的那份（`{Y, dom, log, w, h, pad}`）：`zPaint` 存进 `ZGEO`，渲染与命中共用同一个 Y 映射，自己再算一份必然错位。MVRV 这类倍数值在 2010 年有一个极端点（实测 2010-07-19 的 45.92），按全域画整条线会被压成一条平线，所以放大图只在「2%~98% 分位那一段不足全域 1/4」时按分位截断纵轴，并在弹层里写明真实全域与被裁到尺度外的点数——**数据一条没删，只是纵轴不再被单点绑架**；卡片刻度图仍按全域画，不走这个截断。
+
+**通道卡放大图是三条线 + 对数纵轴（2026-09-24）**：只有 `two_year_multiply` 走这条路。服务端在这一张卡上多下发一份 `bands[]`：`{d, lo, hi, px}`，等间隔抽 `BAND_POINTS`（默认 400）根，实际条数在它附近（当前 433），`lo`/`hi` 是 looknode 那两条线，`px` 是 Yahoo `BTC-USD` 收盘——按「该日或之前最近一个交易日」前向填充对齐（`bisect`，不是精确等值匹配：Yahoo 的收盘序列会缺根，实测就缺了 2026-09-23 那根，精确匹配会让最后一点没有现价）。**上游没有的日期就是 `px:null`，不填 0、不外推**：通道起点 2012-07 早于 Yahoo 起点 2014-09，所以左边那一截只有两条线，卡片的「价格线覆盖」一行与图脚都写明从哪天起、缺多少个采样点。前端画三条语义色线——**绿=支撑 730MA、红=压力 730MA×5、黄=现价**（这张卡的判据就是「现价落在通道哪一侧」，颜色跟语义走、不跟 `tone` 走），配一行图例；纵轴**对数**，且轴只上下各留 8% 的对数余量、不把 min/max 硬凑到整十倍档（数据跨约 4 个数量级，凑档要多空出近两格，三条线全挤在上半截，就是「跟上游那张图差很多」的直接原因）。悬浮气泡一次报全该日的支撑 / 压力 / 现价与「现价 ÷ 支撑」，高亮点钉在现价线上（那日缺现价就退到支撑线）。
+
+> **修订记录**：本节上一版写着「**悬浮层只挂在 `#z-chart` 容器上，`lineChart` 一行没改**——崩盘页那四张图共用它……不值得为这点交互去动共享层」。这句到 2026-09-24 已经不成立：为了让通道卡三条线共用一套轴，`lineChart` 加了三个可选参数（`lines`、`log`）并改成**回传几何**，仍然全部向后兼容（不传就跟原来一模一样），但**共享层确实被动了**，崩盘页那四张图属于回归范围。改的另一个原因是它原先连纵轴范围都要调用方自己传，对数轴下没法只靠猜。
 
 
 ### /api/liquidity（`api/liquidity.py`）
@@ -159,7 +194,7 @@ DigitalAssetsMetricsBoard/
 
 - **流动性页**：13 项红黄绿阈值逐条列在 `api/Liquidity/README.md` 第 6 节，页面代码与其一致。
 - **崩盘页**：六因子加权（risk_model v1.3：分位数 + 非线性 + 共振 + 红线托底），规则在页面「判级规则」区公开。
-- **BTC 指标页**：各张卡各自判定，不合成总分；阈值逐条抄自 `api/Crypto/handle_*.py`（`operationConfig.py:213-218,327-328` 的那几档，那份配置表在 cryptoTrader 的 `utils/` 里、没抄进本仓库）——`two_year_multiply` 是唯一的例外，cryptoTrader 没有这一项，两条线（730MA / 730MA×5）与判据都照抄 looknode 该页「指标描述」原文，连它自己写的回测衰减提示也搬进卡片 note，本页不另设阈值。页面「口径与阈值」块把每一项的公式、参数、上游文件行号原样印出来。KDJ 的 K/D 是「近 3 根算术均值」（不是行业常见的 1/3 平滑），MACD 信号线只对 `macd[25:]` 做 EMA9——这两处最容易抄错，所以行号写在卡片注释里。
+- **BTC 指标页**：各张卡各自判定，不合成总分；阈值逐条抄自 `api/Crypto/handle_*.py`（`operationConfig.py:213-218,327-328` 的那几档，那份配置表在 cryptoTrader 的 `utils/` 里、没抄进本仓库）——`two_year_multiply` 是唯一的例外，cryptoTrader 没有这一项，两条线（730MA / 730MA×5）与判据都照抄 looknode 该页「指标描述」原文，连它自己写的回测衰减提示也搬进卡片 note，本页不另设阈值（**判级始终只看这两条线与现价的关系**；放大图里那条黄色现价线只是把「现价」画出来好读，来自 Yahoo，不参与判级）。页面「口径与阈值」块把每一项的公式、参数、上游文件行号原样印出来。KDJ 的 K/D 是「近 3 根算术均值」（不是行业常见的 1/3 平滑），MACD 信号线只对 `macd[25:]` 做 EMA9——这两处最容易抄错，所以行号写在卡片注释里。
 - **配置页**：「贪婪恐慌深度」= 三个子分位（价/MA200 乖离、20 日动量、距 52 周高点回撤）各自在最近 756 交易日窗口内的百分位取均值（≥2 个子分位才成立）；恐慌档 2/5/8/18（4~1 级，配额 40/30/20/10%），贪婪档 65/78/88/95 只标注不卖出；全球温度 = 可得标的等权均值，缺口剔除并列入「检索缺口」。公式完整印在页面「判级规则」块。
 - 已知口径限制（页面同时声明）：分位按收盘价计算，不随盘中价变动；指数为本币计价，未做汇率换算；中国利率板块无已验证取数源，按缺口列示不臆造。
 
@@ -198,7 +233,7 @@ serv00 的 python 站点类型 = Phusion Passenger **WSGI**：面板用「Interp
 点「加密持仓报告」即在服务所在机器上执行 `/home/myaibtc/vevns/web3/bin/python /home/myaibtc/vevns/cryptoTrader/tests/runningOrder.py`，
 stdout 也只在按需展开时显示；约束只有 `[report] daily_limit`（加密 3 次/天）、`us_daily_limit`（美股 2 次/天）与「同一时刻只有一个报表进程」。
 点「US股持仓报告」跑的是它自己的脚本（`runningStorcksOrder.py`），额度独立算每天 2 次。**没有令牌、没有登录**——报表正文本来就发到他自己的 Telegram，页面只是再显示一遍；
-任何凭据都不要出现在 `config.ini` 或上传包里（曾经的 `?key=` 令牌门已于 2026-09-22 撤除，别再往回加）。
+凭据原则上不要出现在 `config.ini` 或上传包里——**2026-09-24 用户明示开了一个口子**：`[dingding]` / `[TG]` 两段明文入库并随包上公网（见第 4 节那段「凭据的去处」），除这两段外仍按老规矩办，任何接口、日志与聊天都不许回显它们。曾经的 `?key=` 令牌门已于 2026-09-22 撤除，别再往回加。
 
 上传与面板（2026-09-22 实测有效的布局）：
 
@@ -283,7 +318,7 @@ python api/db.py --help              # 完整说明
 | 层 | 哪些键 | 行为 |
 |---|---|---|
 | ①「今天取过就不再取」 | `btc:looknode:*`（MVRV/CVDD）、`btc:cbbi`、`btc:litb`、`btc:ahr999`、`btc:fng`、`crash:shiller`、`crash:buffett` | 当天已有磁盘文件 → 直接回那份，**一次上游都不打**；日志 `[cache] <键> 磁盘日缓存命中（今天 … 已取过，未打上游）` |
-| ②只做失败兜底 | 其余全部（FRED 各序列、`btc:klines`、`mkt:*`、`crash:yields`、`alloc10:*`…） | 照常按 TTL 打上游；只在**取数失败且内存里没有旧值**时退回磁盘那份，日志写「沿用磁盘上 X 取的旧值」 |
+| ②只做失败兜底 | 其余全部（FRED 各序列、`btc:klines`、`btc:yahoo:BTC-USD`（通道卡现价线，6h TTL；**故意不进白名单**——它那串日线的最后一根是今天没收盘的 bar，缓存一整天就是把未收盘值当收盘价用）、`mkt:*`、`crash:yields`、`alloc10:*`…） | 照常按 TTL 打上游；只在**取数失败且内存里没有旧值**时退回磁盘那份，日志写「沿用磁盘上 X 取的旧值」 |
 
 第②层为什么不也给 FRED 它们开①：这些键盘中还会变（WALCL/TGA 是当天晚些时候才发布），拿①挡就等于把当天的新值关在门外——那与本项目「绝不把滞后值冒充实时」的纪律冲突。
 
@@ -323,10 +358,11 @@ python api/db.py --help              # 完整说明
 
 ## 9. 安全边界（硬约束，见 `Qoder.md` 第 7 节）
 
-- 本机版服务只绑定 `127.0.0.1`；`/api/*` 仅接受白名单参数，不做任意 URL 转发。公网版（`PUBLIC=1`）由 Passenger 对外，本服务自身仍不开端口，额外收敛只有第 7.2 节那一条静态扩展名白名单；除此之外**没有鉴权、没有限流**，公开的是取数与判级逻辑，不含任何凭据。
+- 本机版服务只绑定 `127.0.0.1`；`/api/*` 仅接受白名单参数，不做任意 URL 转发。公网版（`PUBLIC=1`）由 Passenger 对外，本服务自身仍不开端口，额外收敛只有第 7.2 节那一条静态扩展名白名单；除此之外**没有鉴权、没有限流**，公开的是取数与判级逻辑；静态白名单不收 `.ini`，所以浏览器拿不到配置文件，但**仓库本身是公开的**，`config.ini` 里那两段明文凭据的来龙去脉与后果见第 4 节。
 - 两个持仓报告（`report?kind=crypto` / `?kind=us`）是本服务唯一执行外部程序的路由——共用一把串行锁，同一时刻只有一个报表进程：路径与解释器全部写死在代码里、按 OS 二选一，只能由 `config.ini`／环境变量覆盖，`kind` 只接受 `crypto|us`，不接收任何来自页面的命令、参数或路径。副作用与暴露面（2026-09-22 用户知情后选定，2026-09-23 同样口径接到美股）：两个脚本无参数运行都会把报表推送到 Telegram，点一次发一条；公网版与本机版一样不带凭据，能打开首页的人都能点，唯一闸门是各自的每日次数上限（加密 `[report] daily_limit` 默认 3、美股 `us_daily_limit` 默认 2，超限 429）与上面那把串行锁。计数落盘在 `data/report_quota.json`，形状是 `{date, kinds: {crypto: n, us: m}}`。
-- 不写鉴权、不持久化凭据；代理地址只出现在 `config.ini` 或环境变量，日志与响应体里也不写凭据。BTC 指标页各项的上游**全部公开无密钥**；唯一可能的密钥是 AHR999 的备用路径 `COINGLASS_KEY`，它**只能来自环境变量**——`CONFIG_ENV` 里没有这一项，所以既不进 `config.ini`、也不进上传包，没设就完全不试那条路。`/api/btc/one?k=` 的 `k` 走 `_KEYS` 白名单，未知键 400，不接受任何 URL、路径或参数透传。
-- 落库层（7.3）的三条边界：① 它是**旁路**，任何失败只记日志，绝不把异常冒到页面路径上；② `/api/db/health` 连主机名、账号、口令都不回（公网版也挂着它），日志里口令只以「来源是哪一层」出现；③ 持仓报告的 stdout **一个字符都不进库**，库里只存元数据（谁、何时、成没成、多长、报错摘要）。`[mysql] PASSWD` 的解析顺序是环境变量 > `local.ini` > `config.ini`，写进 `config.ini` 的那一行在提交前必须清空。
+- 服务本身不写鉴权、不把凭据写进任何它生成的文件；代理地址只出现在 `config.ini` 或环境变量，日志与响应体里也不写凭据。BTC 指标页各项的上游**全部公开无密钥**；唯一可能的密钥是 AHR999 的备用路径 `COINGLASS_KEY`，它**只能来自环境变量**——`CONFIG_ENV` 里没有这一项，所以既不进 `config.ini`、也不进上传包，没设就完全不试那条路。`/api/btc/one?k=` 的 `k` 走 `_KEYS` 白名单，未知键 400，不接受任何 URL、路径或参数透传。
+- **Telegram 出站（`api/notify.py`，2026-09-24）不是路由**：没有任何 HTTP 接口调它，页面上按不到，能真发消息的那条命令必须由人在命令行上敲出 `--send` **并且**带 `--bot`，其余路径最多发只读的 `getMe`。它也不改变前面那条「唯一执行外部程序的路由」的结论——那两个持仓报告按钮仍然是本服务里唯一会跑外部脚本的地方（`notify.py` 只发一次 HTTPS 请求，不 spawn 进程）。**BTC 指标的自动推送只有命令行这一条路**（口径见第 4 节：`BTC_WATCH` 四张卡的 `tone` 命中 `green`/`red` 才发，同一 `(机器人, 业务日)` 一条，`[notify] daily_limit` 封顶）；要「每天自动播」得由你在自己机器上挂 cron／计划任务跑 `--btc --send`，**服务代码里没有一行会自己发信**，也别给它加路由——理由就是那三次误发：一条会自己发信的链路必须先有「一天最多几条、发什么、发给谁」的明确约定，这条约定 2026-09-24 已经定了，改它要连着改本节。
+- 落库层（7.3）的三条边界：① 它是**旁路**，任何失败只记日志，绝不把异常冒到页面路径上；② `/api/db/health` 连主机名、账号、口令都不回（公网版也挂着它），日志里口令只以「来源是哪一层」出现；③ 持仓报告的 stdout **一个字符都不进库**，库里只存元数据（谁、何时、成没成、多长、报错摘要）。`[mysql] PASSWD` 的解析顺序是环境变量 > `local.ini` > `config.ini`，写进 `config.ini` 的那一行提交前应清空——**2026-09-24 核对：那行口令已经在公开的 `origin/main` 上了**，所以这条只对以后的提交有效，已经泄露的那把要么轮换要么清历史，由用户定。
 - 不 `git add/commit/push`（未经明示指令）；不使用 Qoder Sites `prepare_site`/`publish_site`。公网托管只走第 7.2 节的 serv00/Passenger 路径（2026-09-22 用户明示授权；此前本项目的部署约定是「只在本机」，此次变更按修订记录公开追加而非静默改写）。
 - 数据纪律：绝不把滞后值标成实时；缺测值剔除并入「检索缺口」，不估值；纠错公开追加修订记录，不静默改写。
 

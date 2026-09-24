@@ -9,7 +9,12 @@
 <link rel="stylesheet" href="common.css">
 <script>try{document.documentElement.dataset.theme=localStorage.getItem("board-theme")||"dark"}catch(e){}</script>
 <style>
-  /* 本页特有版式：指标卡网格 + 口径表 */
+  /* 本页特有版式：指标卡两列一行 + 口径表 */
+  /* 覆盖 common.css 的 .grid（那是 auto-fill 窄列，流动性/崩盘页共用它，所以只在本页改 #grid）。
+     13 张卡落单的那张补满整行，免得右下角空出半格；窄屏退回一列。 */
+  #grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  #grid .icard:last-child:nth-child(odd){grid-column:1 / -1}
+  @media (max-width:760px){#grid{grid-template-columns:minmax(0,1fr)}}
   .icard{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:15px 16px 13px;position:relative}
   .icard:hover{border-color:var(--line2)}
   .icard.t-red{border-color:rgba(242,85,90,.45)}
@@ -43,7 +48,7 @@
   .gaplist li::before{content:"×";position:absolute;left:0;color:var(--red)}
   .gaplist li b{color:var(--tx)}
 
-  /* 双击放大：整屏遮罩 + 居中弹层，画的是这张卡自己的 hist 序列 */
+  /* 双击放大：整屏遮罩 + 居中弹层，画的是这张卡自己的序列（通道卡画 bands 那三条线，其余画 hist） */
   .icard{cursor:zoom-in}
   .icard summary,.icard .rf{cursor:pointer}
   .icard .rt{display:flex;gap:6px}
@@ -66,6 +71,15 @@
         font-family:var(--mono);font-size:11.5px;color:var(--tx);background:var(--bg3);border:1px solid var(--line2);
         border-radius:5px;padding:3px 8px;box-shadow:0 4px 14px rgba(0,0,0,.35)}
   .ztip.on{display:block}
+  /* 通道卡放大图才有：三条线的图例 + 多行气泡（一个日期同时报支撑/压力/现价） */
+  .zlg{display:flex;flex-wrap:wrap;gap:4px 16px;padding:6px 6px 8px;font-size:11.5px;color:var(--tx2)}
+  .zlg span{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono)}
+  .zlg i{width:11px;height:3px;border-radius:2px;display:inline-block;flex:none}
+  .zlg b{color:var(--tx);font-weight:600}
+  .ztip.lines{white-space:normal;min-width:190px;line-height:1.75}
+  .ztip.lines span{display:flex;align-items:center;gap:7px}
+  .ztip.lines i{width:10px;height:3px;border-radius:2px;flex:none}
+  .ztip.lines b{margin-left:auto;font-weight:600}
   .zmeta{margin-top:2px}
   .zmeta .cadb{margin-top:10px}
   .zdet{display:grid;grid-template-columns:repeat(auto-fit,minmax(228px,1fr));gap:0 22px;margin-top:12px}
@@ -79,7 +93,7 @@
 
 <header>
   <div class="bar">
-    <div class="brand"><b><a href="../Index.html">Lattice</a></b><span>BTC Metrics Desk</span></div>
+    <div class="brand"><b><a href="../Index.html">我爱大饼</a></b><span>BTC Metrics Desk</span></div>
     <nav class="tabs" id="tabs" aria-label="看板导航"></nav>
     <div class="asof num" id="asof"></div>
     <div class="lbar"><button class="rf" id="rf" type="button">↻ 刷新</button><button class="rf" id="rff" type="button" title="跳过服务端缓存，直接打上游重取全部指标">⤳ 穿透缓存重取</button><span class="ls" id="livestat">取数中…</span></div>
@@ -119,7 +133,7 @@
   </section>
 
   <section id="rules" style="margin-top:30px">
-    <div class="shead"><h2>口径与阈值</h2><span class="tagline">「上游」列 = <span class="num">api/Crypto/handle_*.py</span> 里的行号（cryptoTrader 同名文件的仓库内副本，逐字节一致；阈值表 <span class="num">operationConfig.py</span> 那份没抄进来，仍在 <span class="num">D:/Qorder_ws/cryptoTrader/utils/</span> 只读）；本页只是把它重写成零依赖版，没改判级数字</span><div class="rule"></div></div>
+    <div class="shead"><h2>口径与阈值</h2><span class="tagline"><b>顺序与上方卡片区一致</b>（两处都跟着 <span class="num">api/btc.py</span> 的 INDICATORS 排）；「上游」列 = <span class="num">api/Crypto/handle_*.py</span> 里的行号（cryptoTrader 同名文件的仓库内副本，逐字节一致；阈值表 <span class="num">operationConfig.py</span> 那份没抄进来，仍在 <span class="num">D:/Qorder_ws/cryptoTrader/utils/</span> 只读）；本页只是把它重写成零依赖版，没改判级数字</span><div class="rule"></div></div>
     <div class="panel rule-tbl" id="rules-body"></div>
   </section>
 
@@ -149,6 +163,7 @@
         <a href="https://www.looknode.com/zh/chart/Ahr999/" target="_blank" rel="noreferrer">looknode.com · AHR999 原图页</a>
         <a href="https://www.looknode.com/api/twoYearMultiply" target="_blank" rel="noreferrer">looknode.com · 2年MA乘数通道（v1/v2 两条线）</a>
         <a href="https://www.looknode.com/zh/chart/twoYearMultiply/" target="_blank" rel="noreferrer">looknode.com · 2年MA乘数 原图页（判据原文在它的「指标描述」）</a>
+        <a href="https://finance.yahoo.com/quote/BTC-USD/history" target="_blank" rel="noreferrer">Yahoo Finance · BTC-USD 日线收盘 20y（只给通道卡放大图那条黄色现价线）</a>
         <a href="https://api.kraken.com/0/public/OHLC?pair=XBTUSD&amp;interval=1440" target="_blank" rel="noreferrer">Kraken OHLC · 日线（721 根）</a>
         <a href="https://www.okx.com/api/v5/market/candles?instId=BTC-USDT&amp;bar=1D&amp;limit=300" target="_blank" rel="noreferrer">OKX candles · 日线</a>
         <a href="https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity=86400" target="_blank" rel="noreferrer">Coinbase candles · 日线</a>
@@ -224,8 +239,9 @@ function card(it) {
 function riskOf(tone) { return tone === 'red' ? '#f2555a' : tone === 'green' ? '#4ade80' : '#d4af37'; }
 function isToday(d) { return d === new Date().toISOString().slice(0, 10); }
 
-/* ---- 双击放大：把这张卡自己的 hist 序列用公共 lineChart 画大，不另取数、不换口径 ---- */
-let ZKEY = null;
+/* ---- 双击放大：把这张卡自己的序列用公共 lineChart 画大，不另取数、不换口径 ----
+   通道卡（带 bands）例外地画三条线 + 对数轴：支撑 / 压力 / 现价，其余卡仍是头条那一条序列 */
+let ZKEY = null, ZBAND = null;
 function itemOf(key) { return ((DATA && DATA.items) || []).find(x => x.key === key); }
 
 function zoom(key) {
@@ -279,12 +295,22 @@ function zHover(e) {
   const host = $('z-chart'), svg = host.querySelector('svg');
   if (!svg || !ZGEO) return zHoverOff();
   const sr = svg.getBoundingClientRect(), vb = svg.viewBox.baseVal;
-  if (!sr.width || !ZGEO.vals.length) return zHoverOff();
+  const n = ZGEO.series ? ZGEO.series[0].vals.length : ZGEO.vals.length;
+  if (!sr.width || !n) return zHoverOff();
   const ux = (e.clientX - sr.left) / sr.width * vb.width;          // 客户端像素 → viewBox 坐标
-  const st = (ZGEO.w - ZGEO.pad * 2) / (ZGEO.vals.length - 1);
-  const i = Math.max(0, Math.min(ZGEO.vals.length - 1, Math.round((ux - ZGEO.pad) / st)));
-  const x = ZGEO.pad + st * i, v = ZGEO.vals[i];
-  const y = ZGEO.h - ZGEO.pad - (v - ZGEO.dom[0]) / ((ZGEO.dom[1] - ZGEO.dom[0]) || 1) * (ZGEO.h - ZGEO.pad * 2);
+  const st = (ZGEO.w - ZGEO.pad * 2) / (n - 1);
+  const i = Math.max(0, Math.min(n - 1, Math.round((ux - ZGEO.pad) / st)));
+  const x = ZGEO.pad + st * i;
+  // 圆点钉在哪条线上：通道图优先现价（它才是读数的主体），那日缺现价就退到支撑；单线卡用唯一那条
+  let v, vc;
+  if (ZGEO.series) {
+    const s = ZGEO.series.find(x2 => x2.anchor && Number.isFinite(x2.vals[i])) ||
+              ZGEO.series.find(x2 => Number.isFinite(x2.vals[i]));
+    if (!s) return zHoverOff();
+    v = s.vals[i]; vc = s.color;
+  } else { v = ZGEO.vals[i]; vc = ZGEO.color; }
+  if (!Number.isFinite(v)) return zHoverOff();
+  const y = ZGEO.Y(v);                                             // Y 映射由 lineChart 回传，对数轴下不能再自己按线性算
 
   let g = svg.querySelector('#z-cross'), ln, ci;
   if (g) { ln = g.querySelector('line'); ci = g.querySelector('circle'); }
@@ -295,17 +321,27 @@ function zHover(e) {
     ln.setAttribute('stroke', T('--line2')); ln.setAttribute('stroke-width', 1);
     ln.setAttribute('stroke-dasharray', '3 4'); ln.setAttribute('vector-effect', 'non-scaling-stroke');
     ci = document.createElementNS(SVGNS, 'circle');
-    ci.setAttribute('r', 3.6); ci.setAttribute('fill', ZGEO.color);
+    ci.setAttribute('r', 3.6);
     ci.setAttribute('stroke', T('--inset')); ci.setAttribute('stroke-width', 1.5);
     g.appendChild(ln); g.appendChild(ci); svg.appendChild(g);
   }
   g.style.display = '';
   ln.setAttribute('x1', x); ln.setAttribute('x2', x);
-  ci.setAttribute('cx', x); ci.setAttribute('cy', y);
+  ci.setAttribute('cx', x); ci.setAttribute('cy', y); ci.setAttribute('fill', vc);
 
   const tip = tipEl();
-  // 像 "0~100" 这种是刻度说明不是单位，拼在读数后面变成「71 0~100」很难看，只拼真单位（美元 / 倍）
-  tip.textContent = ZGEO.dates[i] + ' · ' + nfd(v, ZGEO.dp) + (ZGEO.unit && !ZGEO.unit.includes('~') ? ' ' + ZGEO.unit : '');
+  tip.classList.toggle('lines', !!ZGEO.series);
+  if (ZGEO.series) {
+    // 三条线共用同一个 x，气泡一次报全：支撑 / 压力 / 现价，外加这条卡真正要读的那个比值
+    const at = k => { const s = ZGEO.series.find(x2 => x2.k === k); return s ? s.vals[i] : null; };
+    const px = at('px'), lo = at('lo');
+    tip.innerHTML = `<b>${esc(ZGEO.dates[i])}</b>` + ZGEO.series.map(s =>
+      `<span><i style="background:${s.color}"></i>${esc(s.label)}<b>${Number.isFinite(s.vals[i]) ? nfd(s.vals[i], 2) : '—'}</b></span>`).join('') +
+      (Number.isFinite(px) && Number.isFinite(lo) ? `<span>现价 ÷ 支撑<b>${(px / lo).toFixed(3)}</b></span>` : '');
+  } else {
+    // 像 "0~100" 这种是刻度说明不是单位，拼在读数后面变成「71 0~100」很难看，只拼真单位（美元 / 倍）
+    tip.textContent = ZGEO.dates[i] + ' · ' + nfd(v, ZGEO.dp) + (ZGEO.unit && !ZGEO.unit.includes('~') ? ' ' + ZGEO.unit : '');
+  }
   tip.classList.add('on');                   // 先显示再量尺寸：display:none 时 offsetWidth/Height 都是 0
   const zr = host.getBoundingClientRect();
   const ax = sr.left - zr.left + x / vb.width * sr.width;
@@ -332,31 +368,58 @@ function zPaint() {
   const host = $('z-chart');
   let cutNote = '';
   ZGEO = null;
-  if (pts.length >= 2) {
+  const bs = (it.bands || []).filter(x => Number.isFinite(x.lo) && Number.isFinite(x.hi));
+  if (bs.length >= 2) {
+    /* 通道卡：三条线 + 对数纵轴，画法对齐上游那张图。颜色按语义写死而不是跟 tone 走 ——
+       这张卡的判据就是「现价落在支撑与压力之间哪一侧」，绿=支撑、红=压力、黄=现价是读图约定。 */
+    const S = [{ k: 'hi', c: '#f2555a', t: '压力 730MA×5' },
+               { k: 'lo', c: '#4ade80', t: '支撑 730MA' },
+               { k: 'px', c: '#f0c43d', t: '现价 BTC-USD' }]
+      .map(s => ({ k: s.k, color: s.c, label: s.t, vals: bs.map(p => p[s.k]),
+                   rows: bs.map(p => ({ d: p.d, v: p[s.k] })) }));
+    host.innerHTML = '';                       // 弹层会反复重画，上一次的占位文字/图例要清掉
+    const geo = lineChart(host, S[1].rows, { lines: S, log: true, w: 960, h: 320, pad: 42,
+                                             fmt: d => d, aria: it.name + ' 通道与现价（放大，对数纵轴）' });
+    ZGEO = { dates: bs.map(p => p.d), w: geo.w, h: geo.h, pad: geo.pad, Y: geo.Y,
+             unit: it.unit || '', dp: it.dp == null ? 2 : it.dp,
+             series: S.map(s => ({ k: s.k, label: s.label, color: s.color, vals: s.vals,
+                                   anchor: s.k === 'px' })) };
+    const last = bs[bs.length - 1];
+    host.insertAdjacentHTML('beforeend', '<div class="zlg">' + S.map(s =>
+      `<span><i style="background:${s.color}"></i>${esc(s.label)} <b>${Number.isFinite(last[s.k]) ? nfd(last[s.k], 2) : '—'}</b></span>`).join('') + '</div>');
+    ZBAND = { n: bs.length, from: (bs.find(x => Number.isFinite(x.px)) || {}).d || '',
+              miss: bs.filter(x => !Number.isFinite(x.px)).length };
+  } else if (pts.length >= 2) {
+    ZBAND = null;
     const vals = pts.map(p => p.v);
     const zs = zoomDom(vals);
     const color = riskOf(tone);
-    ZGEO = { vals, dates: pts.map(p => p.d), w: 960, h: 320, pad: 42, color,
-             dp: it.dp == null ? 2 : it.dp, unit: it.unit || '', dom: zs.dom || domOf(vals, .16) };
-    // 弹层会反复重画（自动刷新 / 切主题），lineChart 只覆盖自己的 svg，上一次的占位文字要手动清掉
     host.innerHTML = '';
-    lineChart(host, pts, { color, w: ZGEO.w, h: ZGEO.h, pad: ZGEO.pad, fmt: d => d, dom: ZGEO.dom,
-                           aria: it.name + ' 历史曲线（放大）' });
+    const geo = lineChart(host, pts, { color, w: 960, h: 320, pad: 42, fmt: d => d,
+                                       dom: zs.dom || domOf(vals, .16), aria: it.name + ' 历史曲线（放大）' });
+    // 几何一律取 lineChart 这次真正用的那份（含 Y 映射），悬浮读数才跟画出来的线严丝合缝
+    ZGEO = { vals, dates: pts.map(p => p.d), w: geo.w, h: geo.h, pad: geo.pad, color, Y: geo.Y, dom: geo.dom,
+             dp: it.dp == null ? 2 : it.dp, unit: it.unit || '' };
     if (zs.cut) cutNote = `<br><b>纵轴按 2%~98% 分位截断</b>：真实全域 ${nfd(zs.cut.min, 4)} ~ ${nfd(zs.cut.max, 4)}，` +
       `${zs.cut.out} 个点落在画框尺度外（照画，只是超出顶部被裁掉）。`;
   } else {
+    ZBAND = null;
     host.innerHTML = `<div class="zempty">${it.ok
       ? `这条卡只有 ${pts.length} 个历史点，画不出曲线。`
       : `取数失败，没有历史曲线。<br>${esc(oneLine(it.error || it.verdict || '上游未给出原因'))}`}</div>`;
   }
   // hist_points 只在 summary 响应里给；没给就不编一个数出来，只报本卡实际点数
   const hp = DATA && DATA.hist_points;
-  $('z-foot').innerHTML =
-    `横轴是日线日期，纵轴就是卡片上那个大数字所在的那条序列 —— <b>与卡片迷你图同源同数据，放大只是把它画大</b>。` +
-    `把鼠标移到曲线上（触屏点一下）即可看该点日期与数值。` +
-    `本卡下发 ${pts.length} 个采样点` +
-    (hp ? `（服务端 <span class="num">api/btc.py</span> 的 HIST_POINTS=${esc(hp)} 是抽样目标，按它等间隔抽样，条数就在它附近）`
-        : `（服务端 <span class="num">api/btc.py</span> 按 HIST_POINTS 等间隔抽样下发）`) +
+  $('z-foot').innerHTML = (ZBAND
+    ? `横轴是日线日期，<b>纵轴是对数刻度</b>（币价跨五个数量级，线性轴会把 2012~2016 压成贴底一条直线；上游那张图也是对数轴）。` +
+      `三条线：<b>绿=支撑 730MA</b>（卡片上那个大数字就是它）、<b>红=压力 730MA×5</b>、<b>黄=现价</b>（Yahoo BTC-USD 收盘，按最近交易日对齐）。` +
+      (ZBAND.from ? `现价线从 ${esc(ZBAND.from)} 起，之前 ${ZBAND.miss} 个采样点上游没有数据 —— <b>不填 0、不外推</b>，所以左边那一截只有两条线。` : '') +
+      `把鼠标移到图上（触屏点一下）同时报该日的支撑 / 压力 / 现价与「现价 ÷ 支撑」。`
+    : `横轴是日线日期，纵轴就是卡片上那个大数字所在的那条序列 —— <b>与卡片迷你图同源同数据，放大只是把它画大</b>。` +
+      `把鼠标移到曲线上（触屏点一下）即可看该点日期与数值。`) +
+    `本卡下发 ${ZBAND ? ZBAND.n : pts.length} 个采样点` +
+    (hp ? `（服务端 <span class="num">api/btc.py</span> 的 ${ZBAND ? 'BAND_POINTS' : 'HIST_POINTS'} 是抽样目标，等间隔抽样、末行必留，条数就在它附近${ZBAND ? '；通道图比卡片迷你图密一档，因为三条线要看得出交叉' : ''}）`
+        : `（服务端 <span class="num">api/btc.py</span> 等间隔抽样下发）`) +
     `。要更长历史得改那个常量。${cutNote}` +
     (it.note ? `<br>${esc(it.note)}` : '');
 }
@@ -434,17 +497,17 @@ async function load(force) {
 const RULES = [
   ['恐慌贪婪指数', 'alternative.me 日线序列，原值 0~100', '≤24 极度恐慌（抄底窗口）· 25~49 恐慌 · 50~74 贪婪 · ≥75 极度贪婪', 'handle_fear.py:104'],
   ['AHR999 定投指数', 'Looknode 现成序列的最后一个点（本页不自算公式）', '&lt;0.45 抄底区 · 0.45~2 中性 · ≥2 顶部危险', 'handle_AHR999.py:33 / operationConfig.py:213,328'],
+  ['2年MA乘数通道', 'Looknode 通道原值：下沿 730MA（美元，头条就是它），上沿 730MA×5；<b>判级用的现价</b>借本页同一 K 线源收盘，与 CVDD 卡同构。<b>放大图里那条黄色现价线是另一份数</b>：Yahoo BTC-USD 20y 日线收盘（K 线源最多只给 500 根≈1.4 年，画不满这条通道），按「该日或之前最近一个交易日」对齐，上游没有的日期留空、不填 0 也不外推', '现价 &lt; 730MA 过度悲观区 · 现价 > 730MA×5 过度贪婪区 · 通道内中性', 'looknode.com/zh/chart/twoYearMultiply（上游页面的「指标描述」原文，cryptoTrader 里没有这条）；现价线另见 finance.yahoo.com/quote/BTC-USD/history'],
   ['CBBI 牛熊信心指数', 'latest.json 的 Confidence ×100（0~1 刻度换算）', '≤35 底部区（≤20 最硬）· 35~80 中性 · ≥80 顶部区', 'handle_CBBI.py:61-93 / operationConfig.py:214,327'],
-  ['CVDD 累计价值币天销毁', 'Looknode 现值，与本页同一 K 线源的收盘比对', '现价 ≤ CVDD×1.05 → 历史底部支撑区', 'handle_CVDD.py:123-151 / operationConfig.py:218'],
-  ['EMA5/EMA10', 'k=2/(n+1)，第 n−1 根用 SMA 播种，之前填当根收盘', '本根上穿=金叉 · 下穿=死叉 · 否则看快线上下', 'handle_EMA.py:74-87,106'],
   ['EMA5/EMA10（新版）', '同上，唯一区别是播种前留 None', '同上（只用最后两根判交叉）', 'handle_EMA_new.py:50-68'],
   ['KDJ(9,3,3)', 'RSV=(C−LLV9)/(HHV9−LLV9)×100；K=近3根RSV算术均值，D=近3根K算术均值，J=3K−2D', '本页标 K 的 80/20 超买超卖（通用读法，上游未设阈值）', 'handle_KDJ.py:112-142'],
+  ['CVDD 累计价值币天销毁', 'Looknode 现值，与本页同一 K 线源的收盘比对', '现价 ≤ CVDD×1.05 → 历史底部支撑区', 'handle_CVDD.py:123-151 / operationConfig.py:218'],
+  ['EMA5/EMA10', 'k=2/(n+1)，第 n−1 根用 SMA 播种，之前填当根收盘', '本根上穿=金叉 · 下穿=死叉 · 否则看快线上下', 'handle_EMA.py:74-87,106'],
   ['Look Into Bitcoin', 'supply-in-profit 序列最后一个点（%）', '&lt;50% 历史大底层 · 55~65% 熊市中期', 'handle_LookIntoBitcoin.py:23-28 / handle_fuckbtc.py:1170'],
   ['MACD(12,26,9)', '信号线只对 macd[25:] 做 EMA9 再补 None；柱=线−信号', '本根上穿=金叉 · 下穿=死叉', 'handle_MACD.py:73-127'],
   ['MVRV', 'Looknode 市值/实现市值，原值倍数', '≤1.0 全网浮亏（底部区）· 顶部无口径故不设', 'handle_MVRV.py:28-32 / operationConfig.py:215'],
   ['NUPL', 'NUPL = 1 − 1/MVRV（Looknode 免费推算路径）', '>0.75 极度贪婪 · 0.5~0.75 乐观 · 0.25~0.5 中性 · 0~0.25 焦虑 · −0.25~0 绝望 · &lt;−0.25 极度绝望', 'handle_NUPL.py:17-24,287'],
   ['SOPR Z-Score', 'z=(末值−均值)/总体std，窗口 365 天；取可用分量的算术均值', 'z &lt; −0.44 底部区域 · z > 0.73 顶部区域', 'handle_SOPR_Z-Score.py:55-58,76-87,284-290,360-367'],
-  ['2年MA乘数通道', 'Looknode 通道原值：下沿 730MA（美元，头条就是它），上沿 730MA×5；现价借本页同一 K 线源收盘，与 CVDD 卡同构', '现价 &lt; 730MA 过度悲观区 · 现价 > 730MA×5 过度贪婪区 · 通道内中性', 'looknode.com/zh/chart/twoYearMultiply（上游页面的「指标描述」原文，cryptoTrader 里没有这条）'],
 ];
 $('rules-body').innerHTML = RULES.map(r =>
   `<div class="kv"><span><i>${r[0]}</i><br><span style="font-size:11px;color:var(--tx3)">${r[1]}</span><br><span style="font-size:11px;color:var(--tx2)">判定：${r[2]}</span></span><b>${r[3]}</b></div>`).join('');

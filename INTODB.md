@@ -40,7 +40,7 @@
 | `mvrv` | MVRV 市值/实现市值 | Looknode | ✓ |
 | `nupl` | NUPL 净未实现盈亏比 | 由 MVRV 推算（免费档） | ✓ |
 | `sopr` | SOPR Z-Score | 由 MVRV 推算，三个 Z 分量只剩 `nupl_z`（Bitbo 实测 401） | ✓ |
-| `two_year_multiply` | 2年MA乘数通道 | Looknode `/api/twoYearMultiply`（下沿 730MA 原值；判定要现价，走 `btc:klines`） | ✓ 存下沿自身 |
+| `two_year_multiply` | 2年MA乘数通道 | Looknode `/api/twoYearMultiply`（下沿 730MA 原值；判定要现价，走 `btc:klines`）。**2026-09-24 起这张卡还多带一份 `bands[]`（433 点 `{d,lo,hi,px}`，现价来自 Yahoo `BTC-USD` 20y），只喂放大图那三条线，一个字节都不入库** | ✓ 存下沿自身（`hist[]` 那 120 点），`bands[]` 不存 |
 
 `mvrv` / `nupl` / `sopr` 共用同一次 Looknode 取数（`mvrv_rows()`，`api/btc.py:264`），所以库里是三行独立
 `series_key`、上游只有一次请求。
@@ -66,6 +66,11 @@
 `series_key` 命名空间例子，但**代码里没有任何写手**——那是给以后留的位置。所以现在查库拿不到币价日线，
 也拿不到流动性序列。要补就在 `store_btc` 里顺着 `out["spot"]` / `klines()` 加一段，别新表。
 
+> 2026-09-24 更新一句：`price:daily` 这个坑现在**顺手就能填**了——通道卡为了画那条黄色现价线，每轮已经在
+> 服务端拿过一份 Yahoo `BTC-USD` 的 20y 日线（`btc_closes()`，实测 4390 根），只是拿完就丢、没写手。
+> 真要入的话键就叫 `price:BTC-USD`，跟着 `store_btc()`（`api/db.py:255`）里现成的那段 `board_series_daily`
+> 写入走——没有独立的 `store_series()` 函数，别新表也别改 DDL。
+
 ## D. 不入库、但同一天不再打上游（磁盘日缓存）
 
 `core.DAY_KEYS`（`api/core.py:258`）白名单之外的一律不缓存到盘；命中就从 `data/daycache/<键>.json` 读，
@@ -79,7 +84,7 @@
 | `btc:cbbi` / `btc:litb` / `btc:ahr999` / `btc:fng` | cbbi / litb / ahr999 / fear；ahr999 现在是内层 `btc:looknode:ahr999` + 外层 `btc:ahr999` 两层，同一份数据在 `data/daycache/` 落两个文件 |
 | `crash:shiller` / `crash:buffett` | 崩盘页 Shiller CAPE、巴菲特指标 |
 
-**不在名单上**（TTL 过就重新打）：`btc:klines`（900s，日内会变，故意不日缓存）、`alloc*`、`crash:fred:*`、
+**不在名单上**（TTL 过就重新打）：`btc:klines`（900s，日内会变，故意不日缓存）、`btc:yahoo:BTC-USD`（21600s = 6h，通道卡现价线；同样**故意不进名单**——那条 20y 序列的最后一根是今天没收盘的 bar，缓存一整天等于把未收盘值当收盘价用）、`alloc*`、`crash:fred:*`、
 流动性页全部。开关是 `[cache] day` / `[cache] dir` → 环境变量 `CACHE_DAY` / `CACHE_DIR`。
 失败结果永不写盘；这套是"少打上游"，与 A/B 的"留历史"是两条独立的路。
 

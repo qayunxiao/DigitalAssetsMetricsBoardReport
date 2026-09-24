@@ -49,7 +49,20 @@ CONFIG_ENV = {("proxy", "http"): "HTTP_PROXY", ("proxy", "https"): "HTTPS_PROXY"
               ("report", "us_script"): "REPORT_US_SCRIPT",
               ("report", "daily_limit"): "REPORT_DAILY_LIMIT",
               ("report", "us_daily_limit"): "REPORT_US_DAILY_LIMIT",
-              ("cache", "day"): "CACHE_DAY", ("cache", "dir"): "CACHE_DIR"}
+              ("cache", "day"): "CACHE_DAY", ("cache", "dir"): "CACHE_DIR",
+              # 通知凭据（2026-09-24 用户明示把明文写进 config.ini，见该文件末尾 [dingding] / [TG] 的注释）。
+              # 列在这里的用意是「env 仍可逐项覆盖」：临时换一个机器人不用改文件。
+              # ⚠ 这些值会进 os.environ，而报表子进程原样继承本服务的环境 —— 那是它自己的机器人，没问题；
+              #   但任何回显环境/配置的接口都不许把它们带出去（/api/health、/api/db/health 都不回这些键）。
+              ("dingding", "SECRET"): "DD_SECRET", ("dingding", "ACCESS_TOKEN"): "DD_ACCESS_TOKEN",
+              ("dingding", "SECRET_MYSELF"): "DD_SECRET_MYSELF",
+              ("dingding", "ACCESS_TOKEN_MYSELF"): "DD_ACCESS_TOKEN_MYSELF",
+              ("dingding", "SECRET_QA"): "DD_SECRET_QA",
+              ("dingding", "ACCESS_TOKEN_QA"): "DD_ACCESS_TOKEN_QA",
+              ("TG", "BOT_TOKEN_QA"): "TG_BOT_TOKEN_QA", ("TG", "CHAT_ID_QA"): "TG_CHAT_ID_QA",
+              ("TG", "BOT_TOKEN_ALVIN"): "TG_BOT_TOKEN_ALVIN", ("TG", "CHAT_ID_ALVIN"): "TG_CHAT_ID_ALVIN",
+              # 播报策略里「可运行参数」的那两个（发给谁、一天最多几条）；观察名单与触发档位留在代码里。
+              ("notify", "tg_bot"): "NOTIFY_TG_BOT", ("notify", "daily_limit"): "NOTIFY_DAILY_LIMIT"}
 CONFIG_ABS = {"LOG_DIR", "CACHE_DIR", "REPORT_CRYPTO_SCRIPT", "REPORT_US_SCRIPT"}
 
 

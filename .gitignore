@@ -2,12 +2,18 @@ __pycache__/
 .idea/
 logs/
 data/report_quota.json
+# data/notify_state.json 是 TG 播报的去重与每日限额记录（api/notify.py），同样是运行期状态：
+# 换机器本来就该重算（当天没发过就是没发过），所以不入库；删掉它最坏的后果是今天多播一条。
+data/notify_state.json
 # data/daycache/ 是磁盘日缓存（api/core.py 的 cached()）：每个键一份「本进程今天取到的原始结果」，
 # 体积到 MB 级、且换机/换网络后本来就该重新取，所以不入库。删掉整个目录没有后果——下次取数会重建。
 data/daycache/
 # 根目录 indicator.ini 里是**活的凭据**（CoinGlass / CryptoQuant Key、钉钉 SECRET+TOKEN、TG BOT_TOKEN、TradingView 口令）。
-# 这仓库是公开的，deploy_app.sh 又按 `git ls-files` 打上传包，所以它既不入库也不进包；
-# 服务运行本身不读它（口径/阈值都在代码里），需要密钥的取数路径只认环境变量，例如 COINGLASS_KEY。
+# ⚠ 这行 ignore **目前不生效**：文件早在 63b9101 就被跟踪（`git ls-files -s indicator.ini` 有输出），而 gitignore 只挡未跟踪文件，
+#   所以这些凭据此刻就在公开的 `origin/main` 里。要真挡住，先由用户执行 `git rm --cached indicator.ini` 再提交，
+#   并且**必须轮换**那批令牌（远端历史仍在，删文件不等于收回）。2026-09-24 核对确认。
+#   另：`deploy_app.sh` 按 `git ls-files` 铺文件，未跟踪清单里没有它，所以这份凭据也已经被复制到 serv00 站点根。
+# 服务运行本身不读它（口径/阈值都在代码里），需要密钥的取数路径只认环境变量或 config.ini（见 api/core.py 的 CONFIG_ENV）。
 indicator.ini
 # local.ini 同样是本机凭据文件（数据库账号口令），不入库不进包。
 local.ini

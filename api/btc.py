@@ -17,14 +17,17 @@
 """
 import os
 import threading
+from bisect import bisect_right
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 import db
-from core import cached, log, remote, short_err
+from core import cached, gov_lock, log, remote, short_err, yahoo_bars
 
 HIST_POINTS = 120            # 每张卡的迷你历史点数（再多响应体就虚胖了）
+BAND_POINTS = 400            # 放大图专用：通道要同时画三条线，120 点画日线价格会抖成锯齿，给它 4 倍密度
+PRICE_RANGE = "20y"          # Yahoo BTC-USD 的日线全域（实测 20y/15y 都到 2014-09-17 为止，max 反而退化成月线）
 LIVE_AGE = 900               # 页面据此标 ● 实时 / ○ 快照（秒）
 KLINE_MIN_BARS = 200         # 少于这个根数算不出 MA200，宁可不显示也不给半截均线
 KEY_ENV = {"coinglass": "COINGLASS_KEY"}     # 可选密钥源：环境变量给了才用
@@ -103,13 +106,39 @@ def _hist(rows, n=HIST_POINTS):
     return [{"d": r["d"], "v": round(r["v"], 4)} for r in out if r.get("v") is not None]
 
 
+def _band_hist(rows, px, n=BAND_POINTS):
+    """通道卡的稠密点列：`[{d, lo, hi}]` + 日期→收盘 → `[{d, lo, hi, px}]`。
+    抽样与 _hist 同一套（等间隔、末行必留），但**三条线共用同一批 x**，否则前端没法对齐。
+
+    价格按「该日或之前最近一个交易日」取（前向填充），不是精确等值匹配：Yahoo 的收盘序列会缺根
+    （实测就缺了 2026-09-23 那根），等值匹配会在图的最右端留一个洞，而那里正是用户看的地方。
+    通道起点（2012-07）早于价格起点（2014-09），这一段没有价格可填，`px=None`，前端照画两条线、
+    缺口在图注里写明，不拿 0 或外推值冒充。"""
+    if not rows:
+        return []
+    step = max(1, len(rows) // n)
+    out = [rows[i] for i in range(0, len(rows), step)]
+    if out[-1] is not rows[-1]:
+        out.append(rows[-1])
+    days = sorted(px)
+    bands = []
+    for r in out:
+        i = bisect_right(days, r["d"]) - 1        # 最近一个不晚于该日的交易日
+        bands.append({"d": r["d"], "lo": round(r["lo"], 2), "hi": round(r["hi"], 2),
+                      "px": px[days[i]] if i >= 0 else None})
+    return bands
+
+
 def _mk(key, name, unit, dp=None, value=None, text=None, tone="gray", verdict="",
-        asof=None, src=None, hist=None, extras=None, note=None, error=None):
-    """一张卡的全部字段。tone: red=顶部/过热，green=底部/多头，gray=中性，bad=取数失败。"""
+        asof=None, src=None, hist=None, extras=None, note=None, error=None, bands=None):
+    """一张卡的全部字段。tone: red=顶部/过热，green=底部/多头，gray=中性，bad=取数失败。
+    `bands` 只有画通道的卡会给（[{d, lo, hi, px}]，放大图三条线），其余卡不带这个键。"""
     d = {"key": key, "name": name, "unit": unit, "ok": error is None,
          "value": value, "text": text, "dp": dp, "tone": "bad" if error else tone,
          "verdict": error or verdict, "asof": asof, "src": src,
          "hist": hist or [], "extras": extras or []}
+    if bands:
+        d["bands"] = bands
     if note:
         d["note"] = note
     if error:
@@ -201,6 +230,19 @@ def klines(force=False):
         return {"ok": False, "error": "K 线源全部不可达: " + ("; ".join(errs) or "无响应")}
 
     return cached("btc:klines", 900, run, force)
+
+
+def btc_closes(force=False):
+    """长历史日线收盘（Yahoo `BTC-USD`，实测 4390 根、2014-09-17 起）——只服务 2年MA 通道图的第三条线。
+    为什么不用本页那份 klines：它最多 500 根（约 1.4 年），而通道横轴是 2012 年至今 5182 天，
+    拿它画价格只剩右边一小截，看着就像"我们的图和上游差很多"。与资产配置页的 `alloc10:BTC-USD`
+    是同一家同一符号，但**故意不共用缓存键**：那边 10y、这边 20y，形状不同，混用会静默少两年。
+    不进日缓存白名单：最后那根是今天的未收盘bar，日内会变，冻结一整天等于给个假收盘。"""
+    def run():
+        with gov_lock:
+            return yahoo_bars("BTC-USD", tag="btc", days_range=PRICE_RANGE)
+
+    return cached("btc:yahoo:BTC-USD", 6 * 3600, run, force)
 
 
 def looknode(url, key, force=False):
@@ -775,7 +817,8 @@ def it_sopr(force=False):
 def it_two_year_multiply(force=False):
     """2年MA乘数通道（下沿 730MA / 上沿 730MA×5）。头条给上游原值（730MA，美元），本页不重算均线、不重算乘数；
     判据照抄该站上「指标描述」原文：现价 < 730MA = 过度悲观区，现价 > 730MA×5 = 过度贪婪区。
-    现价借本页同一 K 线源的收盘，与 it_cvdd 同构；两边的 asof 可以差一天，extras 里各自标明来源。"""
+    现价借本页同一 K 线源的收盘，与 it_cvdd 同构；两边的 asof 可以差一天，extras 里各自标明来源。
+    放大图另有 `bands`（下沿/上沿/收盘三条线，BAND_POINTS 点、对数轴），对齐上游那张图的画法。"""
     d = looknode_band(TWM_URL, "two_year_multiply", force)
     if not d.get("ok"):
         return _mk("two_year_multiply", "2年MA乘数通道", "美元", error=d.get("error"))
@@ -791,23 +834,38 @@ def it_two_year_multiply(force=False):
         verdict, tone = "现价 > 730MA×5（上游口径：过度贪婪区）", "red"
     else:
         verdict, tone = "现价在通道内（730MA ~ 730MA×5）", "gray"
+    # 放大图的三条线：下沿/上沿来自通道接口，收盘来自 Yahoo（另一家，起点 2014-09，比通道晚两年多）。
+    # 价格源挂了不判这张卡失败——头条与判据都不依赖它，只是图上少一条线，所以缺口写进 extras 而不是 error。
+    c = btc_closes(force)
+    px = {r["d"]: r["v"] for r in c.get("rows") or []}
+    bands = _band_hist(rows, px)
+    got = [d for d in sorted(px) if rows and d >= rows[0]["d"]]
+    price_note = ("%s → %s，%d 天" % (got[0], got[-1], len(got))) if got else "取数失败：" + str(c.get("error") or "无响应")[:60]
     return _mk("two_year_multiply", "2年MA乘数通道", "美元", dp=0, value=lo, tone=tone, verdict=verdict,
                asof=rows[-1]["d"], src="Looknode",
                hist=_hist([{"d": r["d"], "v": r["lo"]} for r in rows]),      # 迷你图画的是下沿自身
+               bands=bands,
                extras=[{"k": "通道上沿（730MA×5）", "v": round(hi, 0)},
                        {"k": "现价（同一 K 线源收盘）", "v": spot},
                        {"k": "现价 / 730MA", "v": round(spot / lo, 3) if spot else None},
                        {"k": "近 365 天分位（下沿自身）", "v": _pct_rank([r["lo"] for r in rows], lo)},
-                       {"k": "序列起点 / 点数", "v": "%s · %d" % (rows[0]["d"], len(rows))}],
+                       {"k": "序列起点 / 点数", "v": "%s · %d" % (rows[0]["d"], len(rows))},
+                       {"k": "价格线覆盖（Yahoo BTC-USD，按最近交易日对齐）", "v": price_note}],
                note="「730 天」与「×5」是上游按历史回测挑的一组数值，它页面原文自己留了话：BTC 体量变大、牛熊振幅收窄后这组数值"
                     "的效果可能打折，需要重新挑。本页只照抄它的两条线与它的判据，没有另设阈值。")
 
 
+# 这一张表**就是页面的显示顺序**（`summary()` 用 `pool.map` 并行取数但保序返回，页面照 `items[]` 原样铺卡，
+# 所以改这里就等于改卡片顺序，前端不用另存一份）。前三行按读图重要性排：
+#   ① 恐慌贪婪 + AHR999 ② 2年MA乘数通道 + CBBI ③ EMA5/EMA10（新版）+ KDJ。
+# 剩下七张是**固定顺序**（沿用原来的相对次序），没做每轮随机：页面 15 分钟自动刷一次，
+# 随机换序会让卡片每次刷新跳位置，「刚看的那张卡去哪了」比顺序不好看更糟。真要换序就改这张表。
 INDICATORS = [
-    ("fear", it_fear), ("ahr999", it_ahr999), ("cbbi", it_cbbi), ("cvdd", it_cvdd),
-    ("ema", it_ema), ("ema_new", it_ema_new), ("kdj", it_kdj), ("litb", it_litb),
-    ("macd", it_macd), ("mvrv", it_mvrv), ("nupl", it_nupl), ("sopr", it_sopr),
-    ("two_year_multiply", it_two_year_multiply),
+    ("fear", it_fear), ("ahr999", it_ahr999),
+    ("two_year_multiply", it_two_year_multiply), ("cbbi", it_cbbi),
+    ("ema_new", it_ema_new), ("kdj", it_kdj),
+    ("cvdd", it_cvdd), ("ema", it_ema), ("litb", it_litb), ("macd", it_macd),
+    ("mvrv", it_mvrv), ("nupl", it_nupl), ("sopr", it_sopr),
 ]
 _KEYS = [k for k, _ in INDICATORS]
 

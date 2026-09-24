@@ -68,24 +68,59 @@
     return `<svg class="spark" viewBox="0 0 200 26" preserveAspectRatio="none" width="100%" height="26" aria-hidden="true"><path d="${svgPath(a, 200, 26, 3)}" fill="none" stroke="${color}" stroke-width="1.6" vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
   }
   /* 通用折线图：rows=[{d,v}]，dates 取首/中/末三个标签。dom 给了就用它当纵轴范围（放大图按分位截断用），
-     不给则按数据全域上下各留 16%。 */
-  function lineChart(el, rows, { color = '#d4af37', w = 680, h = 200, pad = 34, fmt = md, area = true, aria = '', dom = null } = {}) {
+     不给则按数据全域上下各留 16%。
+     两个可选参数是给「2年MA乘数通道」放大图加的，都不传时行为与原来一致（全站只有崩盘页那四张图和 BTC 页用它）：
+       lines=[{rows,color,label}] —— 多条线共用一套轴；`v` 非有限值处断线（不连过去、不填 0）。
+       log=true —— 对数纵轴，网格线画在十倍处（币价跨 5 个数量级，线性轴会把早期压成一条贴底的直线）。
+         这时轴范围一律从数据自己推（上下各留 8% 的对数余量），`dom` 不参与 —— 分位截断是线性轴那套的读法。 */
+  function lineChart(el, rows, { color = '#d4af37', w = 680, h = 200, pad = 34, fmt = md, area = true, aria = '', dom = null, lines = null, log = false } = {}) {
     if (!el) return;
-    const v = rows.map(x => x.v);
-    if (v.filter(Number.isFinite).length < 2) { el.innerHTML = ''; return; }
-    const [mn, mx] = (dom && dom.length === 2 && Number.isFinite(dom[0]) && Number.isFinite(dom[1])) ? dom : domOf(v, .16);
-    const Y = x => h - pad - (x - mn) / (mx - mn) * (h - pad * 2);
-    const st = (w - pad * 2) / (v.length - 1), X = i => pad + st * i;
+    const ss = (lines && lines.length) ? lines : [{ rows, color }];
+    const all = [];
+    ss.forEach(s => (s.rows || []).forEach(r => { if (r && Number.isFinite(r.v)) all.push(r.v); }));
+    if (all.length < 2) { el.innerHTML = ''; return; }
+    const lg = x => Math.log10(Math.max(x, 1e-9));
+    let mn, mx, Y, ticks;
+    if (log) {
+      const pos = all.filter(v => v > 0);
+      // 轴只上下各留 8% 的对数余量，不把 min/max 硬凑到整十倍档：通道数据跨 4 个数量级，
+      // 凑档会凭空多出将近两整格空白，三条线全挤在上半截，看着就是「跟上游那张图差很多」。
+      // 凑不凑档都不影响刻度 —— 网格线照旧画在十倍处，只是框内少了几条永远走不到的空档。
+      let e0 = lg(Math.min(...pos)), e1 = lg(Math.max(...pos));
+      const m = (e1 - e0) * .08;
+      e0 -= m; e1 += m;
+      if (pos.length < 2 || e1 - e0 < 1) return lineChart(el, rows, { color, w, h, pad, fmt, area, aria, dom });
+      mn = Math.pow(10, e0); mx = Math.pow(10, e1);
+      Y = x => h - pad - (lg(Math.max(x, 1e-9)) - e0) / (e1 - e0) * (h - pad * 2);
+      ticks = []; for (let e = Math.ceil(e0); e <= Math.floor(e1); e++) ticks.push(Math.pow(10, e));
+    } else {
+      [mn, mx] = (dom && dom.length === 2 && Number.isFinite(dom[0]) && Number.isFinite(dom[1])) ? dom : domOf(all, .16);
+      Y = x => h - pad - (x - mn) / ((mx - mn) || 1) * (h - pad * 2);
+      ticks = ticksOf(mn, mx, 3);
+    }
+    const kfmt = v => v >= 1e9 ? (v / 1e9) + 'B' : v >= 1e6 ? (v / 1e6) + 'M' : v >= 1e3 ? (v / 1e3) + 'k' : (v < 1 ? String(+v.toFixed(2)) : String(v));
+    const X = (i, n) => pad + (w - pad * 2) * i / Math.max(1, n - 1);
     let g = '';
-    ticksOf(mn, mx, 3).forEach(t => { g += `<line x1="${pad}" x2="${w - pad}" y1="${Y(t).toFixed(1)}" y2="${Y(t).toFixed(1)}" stroke="${T('--grid')}" stroke-dasharray="3 4"/><text x="${pad - 5}" y="${(Y(t) + 3.5).toFixed(1)}" fill="${T('--tick')}" font-size="9" text-anchor="end" font-family="monospace">${t}</text>`; });
-    const ln = v.map((x, i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)},${Y(x).toFixed(1)}`).join(' ');
-    const lbl = [0, Math.floor(v.length / 2), v.length - 1]
-      .map(i => `<text x="${X(i).toFixed(1)}" y="${h - 8}" fill="${i === v.length - 1 ? T('--lbl') : T('--tick')}" font-size="9" text-anchor="middle" font-family="monospace">${fmt(rows[i].d)}</text>`).join('');
+    ticks.forEach(t => { g += `<line x1="${pad}" x2="${w - pad}" y1="${Y(t).toFixed(1)}" y2="${Y(t).toFixed(1)}" stroke="${T('--grid')}" stroke-dasharray="3 4"/><text x="${pad - 5}" y="${(Y(t) + 3.5).toFixed(1)}" fill="${T('--tick')}" font-size="9" text-anchor="end" font-family="monospace">${log ? kfmt(t) : t}</text>`; });
+    const pathOf = s => { let d = '', pen = false;
+      s.rows.forEach((r, i) => { if (!r || !Number.isFinite(r.v)) { pen = false; return; }
+        d += `${pen ? 'L' : 'M'}${X(i, s.rows.length).toFixed(1)},${Y(r.v).toFixed(1)}`; pen = true; });
+      return d; };
+    const longest = ss.reduce((a, s) => ((s.rows || []).length > (a.rows || []).length ? s : a), ss[0]);
+    const brows = longest.rows || [];
+    const base = brows.length;
+    const lbl = [0, Math.floor(base / 2), base - 1]
+      .map(i => `<text x="${X(i, base).toFixed(1)}" y="${h - 8}" fill="${i === base - 1 ? T('--lbl') : T('--tick')}" font-size="9" text-anchor="middle" font-family="monospace">${fmt((brows[i] || {}).d)}</text>`).join('');
+    const one = ss.length === 1 ? pathOf(ss[0]) : '';
+    const dots = ss.map(s => { const r = (s.rows || []).filter(x => x && Number.isFinite(x.v)).pop();
+      return r ? `<circle cx="${X((s.rows || []).indexOf(r), s.rows.length).toFixed(1)}" cy="${Y(r.v).toFixed(1)}" r="3.2" fill="${s.color}"/>` : ''; }).join('');
     el.innerHTML = `<svg class="chart" viewBox="0 0 ${w} ${h}" role="img" aria-label="${aria}">
-      ${g}${area ? `<path d="${ln} L${X(v.length - 1).toFixed(1)},${h - pad} L${pad},${h - pad} Z" fill="${hex(color, .08)}"/>` : ''}
-      <path d="${ln}" fill="none" stroke="${color}" stroke-width="2"/>
-      <circle cx="${X(v.length - 1).toFixed(1)}" cy="${Y(v[v.length - 1]).toFixed(1)}" r="3.2" fill="${color}"/>
+      ${g}${(ss.length === 1 && area) ? `<path d="${one} L${X(rows.length - 1, rows.length).toFixed(1)},${h - pad} L${pad},${h - pad} Z" fill="${hex(color, .08)}"/>` : ''}
+      ${ss.map(s => `<path d="${pathOf(s)}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`).join('')}
+      ${dots}
       ${lbl}</svg>`;
+    // 把这次实际用到的几何回给调用方：放大图的悬浮读数要用同一个 Y 映射定十字线，自己再算一份必然对不上
+    return { Y, dom: [mn, mx], log, w, h, pad };
   }
 
   /* ---- 实时/快照角标：● 实时 才是取到了当前值；○ 快照 一律不得冒充实时值 ---- */
