@@ -56,7 +56,7 @@ while [ $# -gt 0 ]; do
     --force-data) FORCE_DATA=1 ;;
     --zip)        MODE="zip"; if [ $# -gt 0 ] && [ "${1#--}" = "$1" ]; then ZIP="$1"; shift; fi ;;
     --zip=*)      MODE="zip"; ZIP="${a#--zip=}" ;;
-    -h|--help)    sed -n '2,26p' "$0"; exit 0 ;;
+    -h|--help)    sed -n '2,23p' "$0"; exit 0 ;;
     --redeploy)   echo "（--redeploy 已不需要：默认每次都重新铺一遍）" ;;
     *) echo "未知参数：$a（-h 看用法）" >&2; exit 2 ;;
   esac
@@ -160,11 +160,34 @@ if [ "$MODE" != "reload" ]; then
   cp -p "$SITE/passenger_wsgi.py" "$SITE/public_python/passenger_wsgi.py"
   cp -p "$SITE/passenger_wsgi.py" "$DOCROOT/passenger_wsgi.py"
 
-  echo "=== 5. 补可执行位与运行目录（zip 不带 x 位；git checkout 带，但幂等没坏处）==="
-  chmod +x "$SITE/start_app.sh" "$SITE/deploy_app.sh" 2>/dev/null || true
+  echo "=== 5. 建运行目录（.sh 的执行位统一在 5.5 补，那里连 --reload 都会走）==="
   mkdir -p "$SITE/data" "$SITE/tmp"
   touch "$SITE/.deployed"
 fi
+
+# ---------- 3.9 站点根所有 .sh 补执行位：刻意放在上面的 if **外面** ----------
+# 名字不能只列 start_app.sh / deploy_app.sh：alert_cron.sh 在 crontab 里是**直接当命令执行**的
+# （写的就是 /usr/home/.../alert_cron.sh，没有 `sh` 前缀），少 x 位＝每天一次 permission denied，
+# 而且只在 cron 的邮件里露一下，交互终端里你永远看不到——logs/notify_cron.log 会连一行都没有。
+# 放在 if 外面是因为运维脚本经常是单独 scp 上去的（shutdown_app.sh 自己覆盖自己跑不了），
+# 补完位希望 `--reload` 这一条轻命令就能生效，而不是逼人重装一遍站点。
+echo "=== 5.5 站点根所有 .sh 补执行位 ==="
+tot=0; fixed=0; miss=""
+for f in "$SITE"/*.sh; do
+  [ -f "$f" ] || continue
+  tot=$((tot + 1))
+  [ -x "$f" ] && continue
+  if chmod +x "$f"; then fixed=$((fixed + 1)); echo "    +x $(basename "$f")"; else miss="$miss $(basename "$f")"; fi
+done
+echo "    站点根 .sh 共 $tot 个，本次补位 $fixed 个（其余本来就有 x 位）"
+if [ "$tot" = 0 ]; then
+  echo "    ⚠ $SITE 下没有任何 .sh —— 运维脚本没铺到站点根，crontab 那条会直接找不到文件"
+elif [ -n "$miss" ]; then
+  echo "    ⚠ chmod 失败：$miss（自己看一下权限，属主不是你就没法补）"
+fi
+for f in alert_cron.sh shutdown_app.sh; do
+  [ -f "$SITE/$f" ] || echo "    ⚠ 站点根缺 $f（本地仓库有；上传/装机没铺下来，靠它的那条 cron 或手工流程跑不了）"
+done
 
 # ---------- 4. 重载：Passenger 没有「启动」这一步，摸 restart.txt 即热重载 ----------
 echo "=== 6. 重载 Passenger ==="

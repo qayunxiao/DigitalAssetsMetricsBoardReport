@@ -1,14 +1,21 @@
 #!/usr/bin/env bash
 # serv00 侧「把公网看板彻底停掉」，并用同一个口径对比内存 —— deploy_app.sh 的反向操作
 #
-#   bash shutdown_app.sh           停：devil www stop → 把本站点残留的 Passenger worker TERM/KILL 掉，停前停后各拍一张快照
-#   bash shutdown_app.sh --yes     不询问，直接动手（默认会先把要杀的 PID 列出来等你确认）
-#   bash shutdown_app.sh --status  只拍快照，什么都不改（先看清楚现状再决定）
-#   bash shutdown_app.sh --start   反向恢复：start/restart + 摸 restart.txt + 打一次 /api/health 把 worker 唤醒，再拍快照
-#   bash shutdown_app.sh --detach  连入口一起摘（三份 passenger_wsgi.py 改名成 .stopped）——devil www stop 收不住时用这条
+#   bash shutdown_app.sh --status  只拍快照，什么都不改（**先跑这条**：看清楚 ps 探测和 worker 明细再决定）
+#   bash shutdown_app.sh           停：杀本站点残留的 Passenger worker（先列 PID 等你 y/N），停前停后各拍一张
+#   bash shutdown_app.sh --detach  连入口一起摘（三份 passenger_wsgi.py 改名 .stopped）——**这才是停得住的那条**
+#   bash shutdown_app.sh --yes     不询问直接动手（非交互环境必须显式加：读不到终端时默认按取消处理）
+#   bash shutdown_app.sh --start   反向恢复：把入口搬回原位 + 摸 restart.txt + 打一次 /api/health 唤醒，再拍快照
 #
 # 为什么要这个脚本：面板那个 512 MB 是**账户级**的，Passenger 又按「并发慢请求」横向扩进程，
 # 所以想知道「这 1.5G 里站点占多少、别的占多少」，唯一的办法是把它彻底停掉再称一次。
+#
+# 两条在服务器上量出来的事实（2026-09-24，别再按直觉改）：
+# · **serv00 没有 `devil www stop`**：回 `[Error] This function does not exist`，`devil www list` 里也只有
+#   域名/类型/路径三列，压根没有 running/stopped 那种状态。所以「停」在这里 = 杀进程 +（要停得住）摘入口。
+# · **`ps -axo …` 与 `ps -o rss= -u 用户` 在这台机器上一行都不吐**（那次跑出来的快照三行全 0，连 SSH 自己
+#   都没算进去，那个 0 是假的）。所以脚本先探测哪种取法有数再用哪种，两种都没数就明说「这一张不可信」，
+#   而不是把 0 当真值报出去。手工核：`ps aux | head -5`。
 #
 # 三条口径说明（对比时别踩）：
 # 1. 内存按 `ps` 里本账户进程的 RSS 直加，跟面板一个算法。注意 RSS 会把共享页重复计一次：
@@ -41,32 +48,49 @@ while [ $# -gt 0 ]; do
     --start)    MODE="start" ;;
     --detach)   MODE="detach" ;;
     --yes|-y)   ASK=0 ;;
-    -h|--help)  sed -n '2,26p' "$0"; exit 0 ;;
+    -h|--help)  sed -n '2,31p' "$0"; exit 0 ;;
     *) echo "未知参数：$1（-h 看用法）" >&2; exit 2 ;;
   esac
   shift
 done
 
 # ---------- 快照用的几个小函数 ----------
+# serv00 实测（2026-09-24 用户跑的回显）：`ps -axo …` 和 `ps -o rss= -u 用户` 在这台机器上**一行都不吐**
+# （快照三行全 0），而他平时用 `ps aux` 是能看见那 4 个 worker 的。所以这里先探测哪种取法有数、再用那种，
+# 两种都没数就**明说探测失败**——把 0 当真值报出去，比没有数字更坏。
+# 两种取法都归一成同四列：`pid rss user when ARGS…`，下面的 grep/awk 与 kill 只认这个形状。
+PS_STYLE="${PS_STYLE:-}"            # 空=自动探测；出问题时可 PS_STYLE=oneline|aux 强制，方便对着 ps 手校
 
-# 本站点 Passenger 拉起的 python 进程：pid rss(KB) etime args
-app_ps() {
-  "$PSBIN" -axo pid=,rss=,etime=,args= 2>/dev/null \
-    | grep -F "$DOMAIN" \
-    | grep -v -e 'grep' -e 'shutdown_app' -e 'ps -axo' \
-    | awk '/python/ {print}'
+ps_raw_oneline() { "$PSBIN" -axo user=,pid=,rss=,etime=,args= 2>/dev/null; }
+ps_raw_aux()     { "$PSBIN" -wwaux 2>/dev/null; }
+
+ps_rows() {
+  case "$PS_STYLE" in
+    oneline) ps_raw_oneline | awk 'NF > 4 {printf "%s %s %s %s ", $2, $3, $1, $4;
+                                          for (i = 5; i <= NF; i++) printf "%s ", $i; print ""}' ;;
+    aux)     ps_raw_aux | awk 'NF > 10 && $2 + 0 > 0 {printf "%s %s %s %s ", $2, $6, $1, $9;
+                                          for (i = 11; i <= NF; i++) printf "%s ", $i; print ""}' ;;
+    *)       ;;                     # 没探测／都没数：宁可可空，不编
+  esac
+}
+
+ps_probe() {
+  [ -n "$PS_STYLE" ] && return
+  if [ -n "$(ps_raw_oneline | head -3)" ]; then PS_STYLE=oneline
+  elif [ -n "$(ps_raw_aux | head -3)" ];   then PS_STYLE=aux
+  else PS_STYLE=none; fi
+}
+
+app_ps() {   # 本站点 Passenger 拉起的 python：pid rss user when args
+  ps_rows | grep -F "$DOMAIN" | grep -v -e grep -e shutdown_app -e 'ps_raw' | awk '/python/ {print}'
 }
 
 app_pids() { app_ps | awk '{print $1}'; }
 
-sum_mb() { awk '{s += $2} END {printf "%.0f", s / 1024}' ; }   # 从 stdin 读 ps 行，第 2 列是 KB
+sum_mb() { awk '{s += $2} END {printf "%.0f", s / 1024}'; }   # stdin 读归一化行，第 2 列是 KB
 
-# 本账户全部进程的 RSS 合计 —— 面板 512 MB 那格的口径
-ram_total() { "$PSBIN" -o rss= -u "$USER" 2>/dev/null | awk '{s += $1} END {printf "%.0f", s / 1024}'; }
-
-other_py() {   # 不属于本站点的 python 进程（用来核对没误伤 cryptoTrader）
-  "$PSBIN" -axo pid=,rss=,etime=,args= 2>/dev/null \
-    | awk -v d="$DOMAIN" '$0 !~ d && /python/ && $0 !~ /awk|shutdown_app/ {print}'
+other_py() {   # 不属于本站点的 python 进程（核对没误伤 cryptoTrader）
+  ps_rows | awk -v d="$DOMAIN" '$0 !~ d && /python/ && $0 !~ /awk|shutdown_app|ps_raw/ {print}'
 }
 
 panel_state() {
@@ -76,27 +100,35 @@ panel_state() {
 }
 
 snapshot() {   # $1 = 这一张快照叫什么
-  local tag="$1" n tot
+  local tag="$1" n tot rows mine odd
+  ps_probe
+  rows="$(ps_rows | grep -c . || true)"
+  mine="$(ps_rows | awk -v u="$USER" '$3 == u' | grep -c . || true)"
   n="$(app_ps | grep -c . || true)"
-  tot="$(ram_total)"
+  tot="$(ps_rows | awk -v u="$USER" '$3 == u {s += $2} END {printf "%.0f", s / 1024}')"
   echo "--- 快照：$tag ---"
+  printf "  ps 探测         : PS_STYLE=%s（ps 里 %s 行，用户名 %s 匹配 %s 行）\n" "$PS_STYLE" "$rows" "$USER" "$mine"
+  if [ "$PS_STYLE" = none ] || [ "$rows" = 0 ] || [ "$mine" = 0 ]; then
+    echo "  ⚠ 这一张的 0 **不可信**：ps 取不到行（或取到的行里没有本账户用户名）。"
+    echo "    手工核一眼：$(basename "$PSBIN") aux | head -5   和   $PSBIN -axo user=,pid=,rss=,etime=,args= | head -5"
+    echo "    对上了就强制指定取法再跑：PS_STYLE=aux bash $0 --status"
+  fi
   printf "  本账户 RSS 合计 : %s MB（面板上限 512 MB，那一格就是这个口径）\n" "$tot"
   printf "  本站点 worker   : %s 个，合计 %s MB\n" "$n" "$(app_ps | sum_mb)"
   if [ "$n" != "0" ]; then
-    app_ps | awk '{printf "      pid=%-7s %6.0f MB  %-9s  %s\n", $1, $2/1024, $3, substr($0, index($0,$4))}'
+    app_ps | awk '{printf "      pid=%-7s %6.0f MB  %-9s  %s\n", $1, $2/1024, $4, substr($0, index($0, $5))}'
   fi
   printf "  其它 python 进程: %s 个，合计 %s MB（不属于本站点，本脚本不会动它们）\n" \
     "$(other_py | grep -c . || true)" "$(other_py | sum_mb)"
-  # 兜底：Passenger 偶尔把标题写成 `Passenger: App …` 之类不带 python 的样子，那条既不进 worker 也不进
-  # 「其它」，会静默漏掉。所以把带域名又不像 python 的行原样列出来，让快照自己把缺口摊开。
-  odd="$("$PSBIN" -axo pid=,rss=,etime=,args= 2>/dev/null | grep -F "$DOMAIN" \
-        | grep -v -e grep -e shutdown_app -e 'ps -axo' -e python || true)"
+  # 兜底：Passenger 有时把标题写成 `Passenger: App …` 之类不带 python 的样子，那条既不进 worker 也不进
+  # 「其它」，会静默漏掉。所以把带域名又不像 python 的行摊开给你看。
+  odd="$(ps_rows | grep -F "$DOMAIN" | grep -v -e grep -e shutdown_app -e 'ps_raw' -e python || true)"
   if [ -n "$odd" ]; then
     echo "  ⚠ 带 $DOMAIN 但不像 python 的进程（没算进上面 worker，自己看一眼是什么）："
     printf '%s\n' "$odd" | sed 's/^/      /'
   fi
   echo "  面板            : $(panel_state)"
-  RAM_BEFORE_TAG="$tag"; LAST_TOTAL="$tot"
+  LAST_TOTAL="$tot"
 }
 
 BEFORE=""; BEFORE_N=""
@@ -141,7 +173,6 @@ if [ "$MODE" = "start" ]; then
   mkdir -p "$SITE/tmp" "$SITE/public_python/tmp" "$DOCROOT/tmp"
   touch "$SITE/tmp/restart.txt" "$SITE/public_python/tmp/restart.txt" "$DOCROOT/tmp/restart.txt"
   if command -v devil >/dev/null 2>&1; then
-    devil www start "$DOMAIN" 2>&1 | sed 's/^/    devil www start: /' || true
     devil www restart "$DOMAIN" 2>&1 | sed 's/^/    devil www restart: /' || true
   fi
   echo "    摸过 restart.txt（Passenger 没有「启动」这一步，下个请求来才起进程）"
@@ -168,11 +199,14 @@ if [ "$MODE" = "detach" ]; then
 fi
 
 echo
-echo "=== 1. 面板级停止 ==="
-if command -v devil >/dev/null 2>&1; then
-  devil www stop "$DOMAIN" 2>&1 | sed 's/^/    devil www stop: /' || true
-else
-  echo "    没有 devil 命令，跳过这一层"
+echo "=== 1. 面板级停止：**serv00 没有这个功能** ==="
+# 2026-09-24 服务器上实测：`devil www stop <域名>` 回 `[Error] This function does not exist`
+# （`devil www list` 里那一行只有 域名/类型/路径 三列，压根没有 running/stopped 状态）。
+# 所以「停站点」在这台机器上只有两条真路：把 worker 进程杀掉（下面第 2 步），和把入口摘掉（跑 --detach）。
+# 只杀进程不算停干净——Passenger 按需拉起，下一个请求就再生一个；要它**停得住**就得 --detach。
+if [ "$MODE" != "detach" ]; then
+  echo "    这次没带 --detach，所以入口还在原位：下面杀完之后，任何人访问一次站点就会再起 worker。"
+  echo "    想让「停止」这件事站得住：bash $0 --detach（把三份 passenger_wsgi.py 改名，--start 一并搬回）"
 fi
 
 echo

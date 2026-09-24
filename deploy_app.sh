@@ -2,7 +2,8 @@
 # serv00 侧部署／重载 DigitalAssetsMetricsBoardReport（Passenger WSGI 站点，没有守护进程可管）
 #
 #   bash deploy_app.sh              拉两个仓库 → 装到站点根 → 重载 Passenger → 冒烟
-#   bash deploy_app.sh --reload     只重载 + 冒烟（代码没动，单纯想让进程换个新的）
+#   bash deploy_app.sh --reload     只重载 + 冒烟（代码没动，单纯想让进程换个新的）＋ 补 .sh 执行位：
+#                                   scp 单独传上去的 alert_cron.sh / shutdown_app.sh 就靠这条点亮 x 位
 #   bash deploy_app.sh --no-pull    不 pull，用仓库目录里现有的内容装机（GitHub 不可达时用）
 #   bash deploy_app.sh --zip [包]   用上传的 damb-public-*.zip 装机，完全不碰 git（离线退路）
 #   bash deploy_app.sh --force-data 连 data/report_quota.json 与 data/risk_history.csv 一起覆盖
@@ -14,8 +15,10 @@
 # （.gitignore 加得晚，已经跟踪上了），照抄一次部署就等于把服务器上「今天已点几次」清回旧值、白送几次点击。
 #
 # 关于「python 服务有没有启动」：Passenger 是按需拉起的，站点空闲时 `ps` 里一个进程都没有，
-# 所以不能拿 ps 当判据。这里以面板 `devil www list` 的 running/stopped 为准，
-# 再叠一个「站点根有没有 api/app.py」判断到底部署过没有。
+# 所以不能拿 ps 当判据。原本想用面板 `devil www list` 的 running/stopped —— 2026-09-24 在 s11 实测
+# 那份输出**只有域名/类型/路径三列，没有状态列**（`devil www stop` 也不存在：This function does not exist），
+# 所以下面取到的 panel 会是「未知」、running 恒为 0，那条 devil www restart 只是尽力而为（摸 restart.txt 才是真通路）。
+# 真正判「到底部署过没有」还是看站点根有没有 api/app.py。
 # 本脚本只碰 $SITE 和 $HOME/vevns 下这两个仓库，绝不碰别的应用。
 #
 # 私有仓库第一次要有凭证（token 当密码），跑一次这两行、再跑本脚本即可：
@@ -176,11 +179,34 @@ if [ "$MODE" != "reload" ]; then
   cp -p "$SITE/passenger_wsgi.py" "$SITE/public_python/passenger_wsgi.py"
   cp -p "$SITE/passenger_wsgi.py" "$DOCROOT/passenger_wsgi.py"
 
-  echo "=== 5. 补可执行位与运行目录（zip 不带 x 位；git checkout 带，但幂等没坏处）==="
-  chmod +x "$SITE/start_app.sh" "$SITE/deploy_app.sh" 2>/dev/null || true
+  echo "=== 5. 建运行目录（.sh 的执行位统一在 5.5 补，那里连 --reload 都会走）==="
   mkdir -p "$SITE/data" "$SITE/tmp"
   touch "$SITE/.deployed"
 fi
+
+# ---------- 3.9 站点根所有 .sh 补执行位：刻意放在上面的 if **外面** ----------
+# 名字不能只列 start_app.sh / deploy_app.sh：alert_cron.sh 在 crontab 里是**直接当命令执行**的
+# （写的就是 /usr/home/.../alert_cron.sh，没有 `sh` 前缀），少 x 位＝每天一次 permission denied，
+# 而且只在 cron 的邮件里露一下，交互终端里你永远看不到——logs/notify_cron.log 会连一行都没有。
+# 放在 if 外面是因为运维脚本经常是单独 scp 上去的（shutdown_app.sh 自己覆盖自己跑不了），
+# 补完位希望 `--reload` 这一条轻命令就能生效，而不是逼人重装一遍站点。
+echo "=== 5.5 站点根所有 .sh 补执行位 ==="
+tot=0; fixed=0; miss=""
+for f in "$SITE"/*.sh; do
+  [ -f "$f" ] || continue
+  tot=$((tot + 1))
+  [ -x "$f" ] && continue
+  if chmod +x "$f"; then fixed=$((fixed + 1)); echo "    +x $(basename "$f")"; else miss="$miss $(basename "$f")"; fi
+done
+echo "    站点根 .sh 共 $tot 个，本次补位 $fixed 个（其余本来就有 x 位）"
+if [ "$tot" = 0 ]; then
+  echo "    ⚠ $SITE 下没有任何 .sh —— 运维脚本没铺到站点根，crontab 那条会直接找不到文件"
+elif [ -n "$miss" ]; then
+  echo "    ⚠ chmod 失败：$miss（自己看一下权限，属主不是你就没法补）"
+fi
+for f in alert_cron.sh shutdown_app.sh; do
+  [ -f "$SITE/$f" ] || echo "    ⚠ 站点根缺 $f（本地仓库有；上传/装机没铺下来，靠它的那条 cron 或手工流程跑不了）"
+done
 
 # ---------- 4. 重载：Passenger 没有「启动」这一步，摸 restart.txt 即热重载 ----------
 echo "=== 6. 重载 Passenger ==="

@@ -274,7 +274,11 @@ stdout 也只在按需展开时显示；约束只有 `[report] daily_limit`（�
 1. 打包排除 `.git/`、`.idea/`、`logs/`、`__pycache__/`、`requirements.txt`、`data/report_quota.json`、`deploy_app.sh`
    （正在跑的脚本被自己覆盖会让 bash 的增量读取错位）、
    `api/Liquidity/_legacy/`、`api/USStockCrashMonitor/`；产物 `D:\Qorder_ws\damb-public-20260923.zip`（或同名 `.tgz`，文件名里的日期 = 打包当天）。
-   Windows 上打的包**必须字节级验行尾**（`start_app.sh` 要 LF／无 BOM），zip 不携带可执行位所以解完要 `chmod +x start_app.sh`。
+   Windows 上打的包**必须字节级验行尾**（`start_app.sh` 要 LF／无 BOM）。zip 不携带可执行位，但不用手工
+   `chmod +x` 一个个点名：`deploy_app.sh` 的「5.5 站点根所有 .sh 补执行位」会扫一遍根目录下的 `*.sh`
+   （`--reload` 也走这段，所以 scp 单独传上去的 `alert_cron.sh` / `shutdown_app.sh` 补一次 `--reload` 就点亮了）。
+   `alert_cron.sh` **必须**有 x 位：crontab 里它是直接当命令执行的，少 x 位＝每天一次静默 permission denied，
+   只有 cron 的邮件里露一下，`logs/notify_cron.log` 会连一行都没有。
 2. 解到**站点根** `/usr/home/myaibtc/domains/myaibtc.serv00.net`（= `~/domains/...`，FreeBSD 上同处）：
    `tar -xf ~/damb-...zip`（FreeBSD 的 `tar` 就是 bsdtar，原生读 zip；兜底 `python -m zipfile -e <zip> <目标目录/>`）。
    第 1～3 步外加「重载 + 冒烟」已经写进根目录的 `deploy_app.sh`，站点根或 `~` 放着包时直接
