@@ -11,3 +11,4 @@ data/daycache/
 indicator.ini
 # local.ini 同样是本机凭据文件（数据库账号口令），不入库不进包。
 local.ini
+./api/allocation.py
