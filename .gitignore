@@ -24,7 +24,8 @@ data/daycache/
 # 2026-09-24 起这份文件**有一处被运行时读**：`[html_alert]` 那一段是页面指标定时播报的阈值与时刻
 #   （`api/core.py` 的 `indicator_get()`，只按段按键取，见该函数注释）。除此之外服务不碰它，
 #   需要密钥的取数路径仍只认环境变量或 config.ini（`api/core.py` 的 `CONFIG_ENV` 一个键都没指向这份文件）。
-indicator.ini
+
 # local.ini 同样是本机凭据文件（数据库账号口令），不入库不进包。
 local.ini
+indicator.ini
 ./api/allocation.py

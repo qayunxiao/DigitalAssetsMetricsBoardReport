@@ -4,17 +4,17 @@
 # 挂法（和你那条 runningOrder.py 同形状：命令写绝对路径）：
 #   10,40 8 * * *   /usr/home/myaibtc/domains/myaibtc.serv00.net/alert_cron.sh
 #
-# 2026-09-24 按你的要求改了口径：**这个脚本不再判「几点」**（它把**两段**的时刻 HTML_ALERT_TOP_AT /
-# HTML_ALERT_BOTTOM_AT 显式设空，绕开 indicator.ini 里那两个 ALERT_AT），执行时机完全由 crontab 那五个字段
-# 决定——你什么时候跑它，它就什么时候真去取数、真去比阈值。只保留「一个日历日只发一条」那一道（并成日报之后**只有一本账**），
-# 因为它是**防重复推送**的（08:10 发成功后 08:40 那次兜底不能再发一条），不是防早跑的。
+# 2026-09-24 按你的要求改了口径：**这个脚本不判「几点」**，执行时机完全由 crontab 那五个字段决定——
+# 你什么时候跑它，它就什么时候真去取数、真去比阈值（怎么做到不判时刻的，见下面那两条 export）。
+# 只保留「一个日历日只发一条」那一道（并成日报之后**只有一本账**），因为它是**防重复推送**的
+# （08:10 发成功后 08:40 那次兜底不能再发一条），不是防早跑的。
 # 当天想再发一次（比如刚改完阈值想立刻看结果）：ALERT_ARGS='--html-alert --send --force' ./alert_cron.sh
 # 注意手工 --force 发过之后，当天那个正常 tick 会被「今天已经发过」挡掉，这是同一道闸门的两面。
 # 只想出一段的条件列：ALERT_ARGS='--html-alert-bottom --send' ./alert_cron.sh（账本共用，发过就当今天这条日报发过了）。
 #
 # ⚠ 2026-09-24 第三次改口径（这条链现在叫**指标日报**）：**不论有没有触发阈值，每天固定发一条**，
-# 正文一行一张卡、两段的「条件 + ✓/✗」并排两列。所以这个脚本的 cron 密度直接等于群里每天收到几条——
-# 闸门②仍然保证一天一条，改 crontab 只是改「几点发」，不会改成「发几条」。
+# 正文一行一张卡、两段的「条件 + ✓/✗」并排两列。但**cron 密度不等于每天收到几条**：闸门②仍然保证一天一条，
+# 改 crontab 那五个字段只是改「几点发」，不会改成「发几条」。
 #
 # 为什么要中间隔这一层，而不是把 python 直接写进 cron（三件事都得靠这层）：
 #   1) 编码。cron 的环境里 LANG 常是 C/POSIX，`api/notify.py` 满屏中文 print 有当场 UnicodeEncodeError
@@ -29,7 +29,11 @@
 #
 # 路径全按自身位置解析：本脚本必须和 `api/`、`config.ini`、`indicator.ini` 同一层（也就是站点根）。
 # 覆盖用环境变量：ALERT_PY=/绝对路径/python 换解释器，ALERT_ARGS='--html-alert' 改成预览（只看不发，
-# 预览永不记账、也永不碰 TG），ALERT_TIME=1 把「不早于 ALERT_AT」那道时刻闸门加回来（两段都加）。
+# 预览永不记账、也永不碰 TG）。
+#
+# 2026-09-24 再收两处：① 原来那个 `ALERT_TIME` 开关（把时刻闸门加回来的口子）整个删了——本脚本从此
+#    不判任何时刻，时刻只有 crontab 一个来源；② 每次执行都**原样打印那一行 python 命令**（见文件末尾），
+#    进日志也回显，照着它在 ssh 里就能手工复跑，不必回头读脚本猜解释器和参数。
 
 set -u
 
@@ -38,20 +42,15 @@ PY="${ALERT_PY:-/usr/home/myaibtc/vevns/web3/bin/python}"
 ARGS="${ALERT_ARGS:---html-alert --send}"
 LOG="$ROOT/logs/notify_cron.log"
 
-# 「几点跑」整个交给 crontab 那五个字段，脚本里不再判时刻：把**两段**的时刻各显式设空，
-# notify.py 的 alert_cfg() 认这个空 = 不设时刻（indicator.ini 里那两个 ALERT_AT 就此被绕过）。
+# 「几点跑」整个交给 crontab 那五个字段，脚本里不再判时刻（原来那个 ALERT_TIME 开关已删）。
+# 但**这两行设空不能删**：`indicator.ini` 里两段各自还写着 `ALERT_AT = 13:28`，不清空的话
+# notify.py 的 alert_gate() 会照它挡到 13:28 —— 那样时刻就有了两个来源，cron 上写的钟点说了不算。
 # 段名前缀是 HTML_ALERT_TOP_ / HTML_ALERT_BOTTOM_（2026-09-24 拆两段之后 env 名跟着换了，别只清一个）。
-# 时刻闸门拿掉之后**只留「一个日历日只发一条」这一道**（并成日报之后只有一本账 data/notify_html_state.json）
-# ——它是防重复推送的，不是防早跑的：同一分钟里 cron 打两次、或者 08:10 发成功后 08:40 那次兜底，都靠它挡成一条。
-# 要退回「脚本也判一次 ALERT_AT」（比如 indicator.ini 里那两行你打算认真用）：ALERT_TIME=1 ./alert_cron.sh
-if [ "${ALERT_TIME:-0}" != 1 ]; then
-    HTML_ALERT_TOP_AT=""
-    HTML_ALERT_BOTTOM_AT=""
-    export HTML_ALERT_TOP_AT HTML_ALERT_BOTTOM_AT
-    GATE="时刻闸门=关（两段都不判几点，跑不跑由 crontab 决定）"
-else
-    GATE="时刻闸门=开（各自用 indicator.ini 里那段的 ALERT_AT）"
-fi
+# 于是本脚本只剩一道闸门：「一个日历日只发一条」（一本账 data/notify_html_state.json）。
+# 它是防重复推送的，不是防早跑的：同一分钟里 cron 打两次、或者 08:10 发成功后 08:40 那次兜底，都靠它挡成一条。
+HTML_ALERT_TOP_AT=""
+HTML_ALERT_BOTTOM_AT=""
+export HTML_ALERT_TOP_AT HTML_ALERT_BOTTOM_AT
 
 PYTHONIOENCODING=utf-8
 PYTHONUTF8=1
@@ -68,12 +67,17 @@ if [ ! -f "$ROOT/api/notify.py" ]; then
 fi
 
 mkdir -p "$ROOT/logs"
+# 这一行就是本次真正执行的命令（上面那几个 export 已经设进环境，所以它与实际调用逐字等价）：
+# 打进日志头，也回显一份到 stdout —— 事后不必读脚本猜解释器和参数，ssh 里照抄就能复跑。
+CMD="HTML_ALERT_TOP_AT= HTML_ALERT_BOTTOM_AT= PYTHONIOENCODING=utf-8 PYTHONUTF8=1 PYTHONPATH=$ROOT/api:$ROOT \
+\"$PY\" $ROOT/api/notify.py $ARGS"
 # %Z 顺带把服务器时区打进日志：第一次跑完照它和 config.ini 的时区对一眼，别猜偏移
-echo "----- $(date '+%F %T %Z') $GATE  $PY $ARGS -----" >> "$LOG" 2>&1
+echo "----- $(date '+%F %T %Z')  $CMD -----" >> "$LOG" 2>&1
+echo "$CMD"
 "$PY" "$ROOT/api/notify.py" $ARGS >> "$LOG" 2>&1
 rc=$?
 echo "----- exit=$rc（0=闸门挡/已发出；1=取数全挂或 TG 发送失败，都不记账，下次 tick 自续；2=没配 [notify] tg_bot）-----" >> "$LOG" 2>&1
-# stdout 只留这一行指路：判定明细全在日志里，cron 的邮件也就能看清「跑过了、去哪看」。
+# stdout 只留这两行指路：判定明细全在日志里，cron 的邮件也就能看清「跑过了、执行的哪条、去哪看」。
 echo "跑完了：exit=$rc（0=闸门挡/已发出，1=取数全挂或发送失败，2=没配 tg_bot）  明细看 $LOG"
-echo "  $GATE ；当天要再发一次：ALERT_ARGS='--html-alert --send --force' $0"
+echo "  当天要再发一次：ALERT_ARGS='--html-alert --send --force' $0 ；只看数不发：ALERT_ARGS='--html-alert' $0"
 exit $rc

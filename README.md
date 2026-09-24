@@ -122,7 +122,7 @@ python api/notify.py --btc --send                       # 真发（机器人取 
 python api/notify.py --btc --send --force               # 连过两道闸门（同一业务日已发过时手工补发）
 python api/notify.py --html-alert                       # 页面指标日报：取数 → 两段各自判定 → 并成一张表，**顺带报「真到 cron 那一刻会不会被闸门挡」**；不发、不记账
 python api/notify.py --html-alert --send                # 真发一条（cron 挂这条；时刻与阈值见 4.1）
-python api/notify.py --html-alert --send --force        # 跳过「不早于 ALERT_AT」和「一个日历日只评一次」（手工补发用）
+python api/notify.py --html-alert --send --force        # 跳过「不早于 ALERT_AT」和「一个日历日只发一条」（手工补发用）
 ```
 
 **`--btc` 的触发口径**（2026-09-24 定，策略常量在 `api/notify.py` 里，运行参数在 `[notify]`）：
@@ -177,9 +177,11 @@ python api/notify.py --html-alert --send --force        # 跳过「不早于 ALE
   已经没人读了，留在服务器上无害）。**预览（不带 `--send`）从不记账**，也照样能看数：
   看一眼配置不该把当天该发的日报哑掉。真发失败同样不记，下一分钟的 cron 自己再试；
   只有「各段阈值全被停用」这种发了也没得比的情况会记一笔「没发」，为的是别让每分钟的 cron 反复打上游。
-  2026-09-24 起 `alert_cron.sh` 把闸门①**关掉**（它 export 两个空的 `HTML_ALERT_TOP_AT` / `HTML_ALERT_BOTTOM_AT`，
-  `alert_cfg()` 对这个键认「设空 = 不设时刻」），时刻整个交给 crontab 那五个字段；闸门②保留，因为它防的是**重复推送**不是早跑。
-  `ALERT_TIME=1 ./alert_cron.sh` 把①加回来（两段一起加）。
+  `alert_cron.sh` 从 2026-09-24 起**自己完全不判时刻**（原来那个 `ALERT_TIME` 开关已经删掉），时刻来源只剩 crontab；
+  闸门②保留，因为它防的是**重复推送**不是早跑。
+- **每次执行都留一行完整命令**：`alert_cron.sh` 把真正调用那一行原样打进日志头、也回显到 stdout——
+  `HTML_ALERT_TOP_AT= … PYTHONPATH=<根>:<根>/api "<venv>/bin/python" <根>/api/notify.py --html-alert --send`，
+  事后不必读脚本猜解释器和参数，ssh 里照抄就能手工复跑（那几个变量在脚本里是 `export` 进环境的，所以带前缀的打印行与实际调用逐字等价）。
 - **日志里另有一行对照**：表后面跟着 `对照 [top] 键: 查询值 (设置阈值) 标记 ; …`（`alert_compare()`），顶部底部各一行，
   进 `logs/notify_cron.log`，**不在 TG 正文里**——那张表要等宽对齐，流水串塞进去会把代码块撑歪。
   跑 `--html-alert` 这条命令行时记得先 `set PYTHONIOENCODING=utf-8`（同 `alert_cron.sh` 里那两行），
