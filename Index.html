@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>数字指标-我爱大饼</title>
+<title>全球金融指标-我爱大饼</title>
 <meta name="description" content="首页内嵌 BTC 数据监控，并作为三个实时风控子页面的入口：宏观流动性监控台、美股崩盘风险监测仪、全球优质资产配置。模块状态与本地取数服务健康度实时探测。">
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="staic/common.css">
@@ -62,8 +62,9 @@
 <body>
 
 <header>
+
   <div class="bar">
-    <div class="brand"><b><a href="Index.html">我爱大饼</a></b><span>数字指标 · Digital Assets Metrics Board</span></div>
+    <div class="brand"><b><a href="Index.html">我爱大饼</a></b><span> Digital Assets Metrics Board</span></div>
     <nav class="tabs" id="tabs" aria-label="看板导航"></nav>
     <div class="asof num" id="asof"></div>
     <div class="lbar"><a class="rf" href="staic/btc.html" title="BTC 日线指标（恐慌贪婪 / AHR999 / CBBI / CVDD / EMA / KDJ / MACD / MVRV / NUPL / SOPR Z / 2年MA乘数通道）">BTC监控</a><button class="rf" id="rf" type="button">↻ 重新探测</button><button class="rf" id="rpt-crypto" type="button">加密持仓报告</button><button class="rf" id="rpt-us" type="button">US股持仓报告</button></div>
@@ -169,7 +170,7 @@
       <h3>主机配额 · serv00<span class="cadb" style="margin-top:0;margin-left:auto">○ 写死快照</span></h3>
       <div class="ph" id="host-ph">—</div>
       <div id="host-rows"></div>
-      <div class="note">这四条的<b>限额与用量</b>取数服务自己都算不出来（<span class="num">/api/health</span> 只有进程内信息，整机配额与账户总占用要调面板子进程），所以按 <span class="num">devil user info</span> 与面板「资源」页的输出手工写死在脚本的 <span class="num">HOST</span> 里，<b>不随部署自动更新</b>；换主机、面板改限额、或你在面板上看到用量变了，就手改那几行。「内存」那一格的 <span class="num">1500M</span> 是 2026-09-24 抄的<b>账户总用量</b>（<span class="num">512 MB</span> 是账户级上限，所以这一格早就超限）。它<b>不接</b> <span class="num">/api/health</span> 的 <span class="num">rss_mb</span>：那是<b>本服务这一个进程</b>的峰值 RSS，跟账户总占用不是一个口径，两个数各自看各自的（要读进程那份就 <span class="num">curl /api/health</span>）。条形宽度、配色、超 100% 时「画到满格但数字照抄」全部由 <span class="num">pct</span> 从 <span class="num">used/limit</span> 推导，页面里没有手填的百分比。</div>
+      <div class="note">这四条的<b>限额与用量</b>取数服务自己都算不出来（<span class="num">/api/health</span> 只有进程内信息，整机配额与账户总占用要调面板子进程），所以按 <span class="num">devil user info</span> 与面板「资源」页的输出手工写死在脚本的 <span class="num">HOST</span> 里，<b>不随部署自动更新</b>；换主机、面板改限额、或你在面板上看到用量变了，就手改那几行。「内存」那一格是<b>账户总用量 / 账户级上限</b>（<span class="num">512 MB</span>）的手工快照，2026-09-24 抄过两次：早上 4 个 Passenger worker 挂着时 <span class="num">1500M</span>＝300%（超限），当天下午优化后 <span class="num">496.1M</span>＝96.89%（余量不到 5%，别当装饰看）。它<b>不接</b> <span class="num">/api/health</span> 的 <span class="num">rss_mb</span>：那是<b>本服务这一个进程</b>的峰值 RSS，跟账户总占用不是一个口径，两个数各自看各自的（要读进程那份就 <span class="num">curl /api/health</span>）。条形宽度、配色、超 100% 时「画到满格但数字照抄」全部由 <span class="num">pct</span> 从 <span class="num">used/limit</span> 推导，页面里没有手填的百分比。</div>
     </div>
   </section>
 
@@ -177,7 +178,7 @@
     <div class="shead"><h2>数据链路</h2><span class="tagline">浏览器直取官方源必被 CORS 拦，代理只解决可达性不解决跨域</span><div class="rule"></div></div>
     <div class="panel">
       <div class="formula">页面 → 同源服务 <b id="origin">http://127.0.0.1:8888</b> /api/{liquidity,crash,allocation}/* →（出口代理取服务端 config.ini 的 [proxy]，当前生效值见上方<b>系统资源 · 出口代理</b>一行）→ FRED / 美国财政部 / Yahoo / CNN / CNBC / multpl / GuruFocus / ccxt 行情源<br>上游分两条串行队列（官方数据 / 行情源），TTL 缓存 + 并发 single-flight；运行时参数一律 <b>环境变量 &gt; config.ini &gt; 代码默认</b></div>
-      <div class="note">未启动本地服务时本页与子页面的实时区全部显示失败标注——启动方法见项目根 <span class="num">start_app.bat</span> 或 <span class="num">python main.py --open</span>。</div>
+<!--      <div class="note">未启动本地服务时本页与子页面的实时区全部显示失败标注——启动方法见项目根 <span class="num">start_app.bat</span> 或 <span class="num">python main.py &#45;&#45;open</span>。</div>-->
     </div>
   </section>
 
@@ -185,10 +186,22 @@
 
 <div class="toast" id="toast" hidden role="status" aria-live="polite"><span id="toast-msg"></span><button class="rf" id="toast-x" type="button" title="关闭">✕</button></div>
 
-<footer>
+<style>
+  .footer-center {
+    text-align: center;
+    padding: 10px 0;
+    margin-top: 20px;
+  }
+  .footer-center p {
+    font-weight: bold;
+    color: #d32f2f;              /* 红色文字，醒目 */
+    font-size: 15px;
+  }
+</style>
+
+<footer class="footer-center">
   <p>Copyright © myaibtc.serv00.net TG: @yunxiao2017</p>
 </footer>
-
 <script src="staic/common.js"></script>
 <script>
 /* 主页只做健康探测与导航，不承载任何判级模型 */
@@ -198,12 +211,12 @@ const REPORTS = { crypto: '/api/allocation/report?kind=crypto',
 /* ---- 系统资源：上面三格 /api/health 每探测周期现取；下面这张表四条全是手工抄的快照 ----
        百分比一律由 used/limit 现算，不再手填 —— 手填过一次就会和数字各说各话。 ---- */
 const HOST = {
-  at: '2026-09-23 06:40 · 内存 2026-09-24', src: 'devil user info · 面板资源页',
+  at: '2026-09-23 06:40 · 内存 2026-09-24 15:41', src: 'devil user info · 面板资源页',
   rows: [
     { k: '磁盘配额 Disk quota', used: '557.2M', limit: '3.0G' },
     { k: '进程数 Processes', used: '7', limit: '20' },
-    { k: '内存 RAM memory', used: '1500M', limit: '512.0M',
-      note: '账户总用量 / 账户级上限，都是抄的；不是本服务进程的 rss_mb' },
+    { k: '内存 RAM memory', used: '496.1M', limit: '512.0M',
+      note: '账户总用量 / 账户级上限，都是抄的；不是本服务进程的 rss_mb。2026-09-24 15:41 抄的 96.89%（同一格当天早上 4 个 worker 挂着时是 1500M = 300%）' },
     { k: 'CPU', used: '0.0', limit: '100' },
   ],
 };

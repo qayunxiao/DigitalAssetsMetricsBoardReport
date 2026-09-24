@@ -295,7 +295,7 @@ stdout 也只在按需展开时显示；约束只有 `[report] daily_limit`（�
    `rss_mb` = **本进程**峰值内存（MB。Unix 走 `resource.ru_maxrss`：**Linux 与 FreeBSD 都是 KB，只有 macOS 给字节**（FreeBSD `getrusage(2)` 明写 "in kilobytes"）；
    Windows 没有 `resource`，改问 `K32GetProcessMemoryInfo`/`psapi` 的 `PeakWorkingSetSize`，两条路都取不到才回 `null`）。
    2026-09-24 之前这里把 FreeBSD 也按字节除，`/api/health` 报的是 `2.1`，实际是 `ru_maxrss ≈ 2,202,009 KB ≈ 2.1G`——差了 1024 倍。
-   这个值**只待在 `/api/health` 里**：主页「主机配额 · serv00」的内存那一格从前拿它现算，但它是**单进程峰值**，和那一格想说的**账户总占用**（ serv00 账户级上限 512 MB）不是一个口径，2026-09-24 起那一格改成手工抄的 `1500M / 512.0M`，四条同一个口径，页面只按 `used/limit` 现算百分比。
+   这个值**只待在 `/api/health` 里**：主页「主机配额 · serv00」的内存那一格从前拿它现算，但它是**单进程峰值**，和那一格想说的**账户总占用**（ serv00 账户级上限 512 MB）不是一个口径，2026-09-24 起那一格改成手工抄的**账户总用量**（当天早上 4 个 Passenger worker 挂着时抄的 `1500M` = 300%，处理后下午是 `496.1M` = 96.89%，限额一直是 `512.0M`），四条同一个口径，页面只按 `used/limit` 现算百分比。
 6. 冒烟五条（都**不会**执行报表脚本）：
    `curl -s https://myaibtc.serv00.net/api/health` 里应有 `"mode": "public"`，并且 `routes.allocation` 含 `report`、`stale` 为 `false`；
    `curl -o /dev/null -w '%{http_code}\n' https://myaibtc.serv00.net/config.ini` 应 `404`；
