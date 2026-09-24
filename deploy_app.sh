@@ -1,12 +1,30 @@
 #!/usr/bin/env bash
 # serv00 侧部署／重载 DigitalAssetsMetricsBoardReport（Passenger WSGI 站点，没有守护进程可管）
 #
-#   bash deploy_app.sh              拉两个仓库 → 装到站点根 → 重载 Passenger → 冒烟
+#   bash deploy_app.sh              拉两个仓库 → 停应用 → 装到站点根 → 重载并拉起 Passenger → 冒烟
 #   bash deploy_app.sh --reload     只重载 + 冒烟（代码没动，单纯想让进程换个新的）＋ 治 .sh（去 CR + 补 x 位）：
 #                                   scp 单独传上去的 alert_cron.sh / shutdown_app.sh 就靠这一条救活
 #   bash deploy_app.sh --no-pull    不 pull，用仓库目录里现有的内容装机（GitHub 不可达时用）
 #   bash deploy_app.sh --zip [包]   用上传的 damb-public-*.zip 装机，完全不碰 git（离线退路）
 #   bash deploy_app.sh --force-data 连 data/report_quota.json 与 data/risk_history.csv 一起覆盖
+#   bash deploy_app.sh --no-stop    装机前不停应用（默认停：TERM → 等 3 秒 → 没退的 KILL）
+#
+# **每次都会停一下应用**（2026-09-25 加，这是脚本的第 2.5 步）：装机那一段是往站点根铺几百个文件，
+# 应用进程还在跑有两个代价——① 它正占着几百 MB（账户内存你看过 96%），铺文件的时候一起挤；
+# ② `cp` 是就地截断再写，并发请求可能 import 到半抄的 `.py`。停一下只多几秒 downtime，两个都躲掉。
+# 停机刻意放在 `git fetch` **之后**：拉仓库可能几十秒网络等待，没必要让站点跟着空这几秒。
+# 「停止」为什么是自己 kill 而不是 devil：serv00 的 `devil www` 没有 stop 这个功能（见下面那段
+# 「关于 python 服务有没有启动」的实测），而 Passenger 的应用进程本来就是「请求来了才 spawn、
+# 杀掉就等于重启」的模型，kill 掉不会留下什么需要收拾的。
+# 匹配范围收得很窄，见 app_pids()：只杀本用户、命令行里有本站域名、且是 python 的那些。
+#
+# 可以反复执行：每次都重新铺一遍跟踪文件（没有「比标记新才装」这种短路），运行期状态默认保留，
+# config.ini 每次覆盖前都留一份带时间戳的 .bak。
+# ⚠ 但别把它当「带事务的部署」：2.5 之后、6 之前任何一个 `exit 1`（比如 3.5 那两份 \$HOME 下的覆盖文件不见了）
+#    会让脚本停在中途，站点根就此半新半旧。好消息是**不会一直停着**——Passenger 有请求就重新 spawn，
+#    盘上的文件立刻能服务；坏消息是没摸 restart.txt，仍活着的那个进程（2.5 只杀带本站域名的 python）
+#    可能还在跑旧代码。补救就两条：`bash deploy_app.sh --reload` 重跑一遍，或手工
+#    `touch tmp/restart.txt` 再 `curl $URL/api/health` 确认 pid 变了。
 #
 # 装机来源跟他的 cryptoTrader 脚本一个路子：仓库常驻 `~/vevns/<仓库名>`，有 .git 就更新、没有就 clone，
 # 然后把 `git ls-files` 列出来的跟踪文件铺到 Passenger 站点根（$SITE）。
@@ -50,16 +68,18 @@ REPO_DIR="${REPO_DIR:-$HOME/vevns/$(basename "${REPO_URL%.git}")}"
 CRYPTO_REPO="${CRYPTO_REPO:-https://github.com/qayunxiao/cryptoTrader.git}"
 CRYPTO_DIR="${CRYPTO_DIR:-$HOME/vevns/cryptoTrader}"    # 持仓报告按钮真跑的就是这里的两个 tests/*.py
 
-MODE="git"; SYNC=1; FORCE_DATA=0; ZIP=""
+MODE="git"; SYNC=1; FORCE_DATA=0; ZIP=""; STOP=1
 while [ $# -gt 0 ]; do
   a="$1"; shift
   case "$a" in
     --reload)     MODE="reload" ;;
     --no-pull)    SYNC=0 ;;
+    --no-stop)    STOP=0 ;;
     --force-data) FORCE_DATA=1 ;;
     --zip)        MODE="zip"; if [ $# -gt 0 ] && [ "${1#--}" = "$1" ]; then ZIP="$1"; shift; fi ;;
     --zip=*)      MODE="zip"; ZIP="${a#--zip=}" ;;
-    -h|--help)    sed -n '2,26p' "$0"; exit 0 ;;
+    # 用法就是文件头那一段注释：整段打到「第一行真代码」为止，不用维护行号（加注释就不用改这里）
+    -h|--help)    awk 'NR==1{next} /^#/{sub(/^# ?/, ""); print; next} !NF{print; next} {exit}' "$0"; exit 0 ;;
     --redeploy)   echo "（--redeploy 已不需要：默认每次都重新铺一遍）" ;;
     *) echo "未知参数：$a（-h 看用法）" >&2; exit 2 ;;
   esac
@@ -86,7 +106,7 @@ if command -v devil >/dev/null 2>&1; then
     *) if [ -n "$line" ]; then panel="未知（$line）"; fi ;;
   esac
 fi
-echo "=== 现状 === 已部署=$deployed  面板状态=$panel  站点根=$SITE  模式=$MODE"
+echo "=== 现状 === 已部署=$deployed  面板状态=$panel  站点根=$SITE  模式=$MODE  装机前停应用=$STOP"
 
 # ---------- 2. 拉仓库：只允许快进，服务器上的本地改动绝不悄悄丢掉 ----------
 # 没有可用凭证时让 git 直接失败，而不是挂在那里等输入（面板/无 tty 环境下会卡死）。
@@ -109,6 +129,57 @@ if [ "$MODE" = "git" ] && [ "$SYNC" = 1 ]; then
   echo "=== 1. 同步仓库 ==="
   sync_repo "$REPO_DIR" "$REPO_URL"   || sync_failed="看板仓库 $REPO_DIR（clone/fetch/快进失败：网络、凭证，或目录里有本地改动。本地改动请自己 git -C $REPO_DIR status 看过再决定，本脚本不会替你 reset；急着装现有内容就加 --no-pull）"
   sync_repo "$CRYPTO_DIR" "$CRYPTO_REPO" || echo "    ⚠ cryptoTrader 没同步成功，沿用目录里现有的脚本与持仓数据（$CRYPTO_DIR）"
+fi
+
+# ---------- 2.4 停机前的前置检查 ----------
+# 放在 2.5 **之前**的理由：这两处缺文件下面都是当场 `exit 1`，既然要失败，就别先把站点停一遍再告诉人失败。
+# `~/allocation.py`、`~/config.ini` 不在 git 里（是服务器上手工维护的那两份，3.5 每次都会盖到站点根），
+# 所以改了仓库里的 `api/allocation.py` / `config.ini` 而忘了同步 `~` 下那两份，站点上仍是旧的 —— 反过来，
+# 手工挪动过 `~` 的话这里会提前拦住，而不是铺完文件才崩。
+if [ ! -f /home/myaibtc/allocation.py ] || [ ! -f /home/myaibtc/config.ini ]; then
+  echo "!! 3.5 要用的 /home/myaibtc/allocation.py 与 /home/myaibtc/config.ini 有缺（这两份是服务器上手工维护的，不在 git 里）" >&2
+  echo "   —— 没停应用、没装机；把文件放回去再重跑" >&2
+  exit 1
+fi
+if [ "$MODE" = "git" ] && [ ! -f "$REPO_DIR/api/app.py" ]; then
+  echo "!! $REPO_DIR 里没有 api/app.py（仓库没拉下来？先看过再用 --no-pull）—— 没停应用、没装机" >&2
+  exit 1
+fi
+
+# ---------- 2.5 停应用：装机之前把本站点那几个 python 进程收掉（--no-stop 跳过）----------
+# 匹配范围收得很窄，四条都是必要的：
+#   · 只认「本用户 + 命令行里带本站域名 + 带 python」，别的账户/别的应用一概不碰。
+#   · 排 deploy：你很可能就是 `bash /usr/home/.../myaibtc.serv00.net/deploy_app.sh` 这样进来的，
+#     自己那一行命令行里同样带着域名，不排掉就是脚本自杀。
+#   · 排 awk：域名是从 `-v d=...` 传进去的，awk 自己的命令行里就有它，会把自家这条算成应用进程。
+#   · 排 passenger-：那是 Passenger 的 spawner，归 Passenger 核心管，不该由部署脚本杀。
+#   · 排 notify.py：cron 那条日报进程（`alert_cron.sh` 起的）命令行里也带着本站域名，会被上面的规则捞进来。
+#     它一次要跑一两分钟取数，杀了不丢账（真发失败本来就不记账，下一分钟的 tick 自己再试），
+#     但白扔一轮上游 + 在日志里留一坨半截输出，所以不碰。
+# 持仓报告的子进程（cryptoTrader/tests/*.py）命令行里没有本站域名，天然不在匹配范围内——这也是故意的，
+# 正跑着的报表别被一次部署掐断（它还会往 TG 发消息，掐在中间比慢几秒糟得多）。
+app_pids() {
+  ps -ww -o pid=,command= -u "$(id -un)" 2>/dev/null | awk -v d="$DOMAIN" '
+    index($0, d) > 0 && index($0, "python") > 0 && $0 !~ /deploy|awk|passenger-|notify\.py/ { print $1 }' || true
+}
+
+if [ "$STOP" = 1 ]; then
+  echo "=== 2.5 停应用（腾出内存、避开半抄的 .py；--no-stop 跳过，6/7 两步负责把它带回来）==="
+  pids="$(app_pids)"
+  if [ -z "$pids" ]; then
+    echo "    没有在跑的应用进程（Passenger 按需拉起，空闲时本来就一个都没有）"
+  else
+    echo "    TERM $(printf %s "$pids" | tr '\n' ' ')"
+    kill $pids 2>/dev/null || true
+    sleep 3
+    left="$(app_pids)"
+    if [ -n "$left" ]; then
+      echo "    3 秒没退，KILL -9 $(printf %s "$left" | tr '\n' ' ')"
+      kill -9 $left 2>/dev/null || true
+      sleep 1
+    fi
+    echo "    已停，现在还剩 $(app_pids | grep -c . || true) 个（0 = 干净）"
+  fi
 fi
 
 # ---------- 3. 装机：把跟踪文件铺到站点根 ----------
@@ -226,7 +297,9 @@ for f in alert_cron.sh shutdown_app.sh; do
 done
 
 # ---------- 4. 重载：Passenger 没有「启动」这一步，摸 restart.txt 即热重载 ----------
-echo "=== 6. 重载 Passenger ==="
+# 2.5 停过之后这里就是把应用带回来的地方：摸 restart.txt 让核心认定旧进程作废，
+# 真正的「起」发生在下面第 7 步那一个 /api/health 请求上（按需 spawn，没人请求就一直没进程）。
+echo "=== 6. 重载 Passenger（2.5 停过就靠这一步 + 第 7 步的第一个请求拉起）==="
 mkdir -p "$SITE/tmp" "$SITE/public_python/tmp" "$DOCROOT/tmp"
 touch "$SITE/tmp/restart.txt" "$SITE/public_python/tmp/restart.txt" "$DOCROOT/tmp/restart.txt"
 if command -v devil >/dev/null 2>&1 && [ "$running" = 0 ]; then
@@ -238,7 +311,9 @@ echo "=== 7. 冒烟 ==="
 "$VENV_PY" -V
 if [ -n "$sync_failed" ]; then echo "    ⚠ $sync_failed"; fi
 if command -v curl >/dev/null 2>&1; then
-  h="$(curl -s -m 30 "$URL/api/health" || true)"
+  # 这一发就是 2.5 之后应用真正的「启动」请求：冷启动要把 btc/allocation 那几层 import 完，
+  # 几秒到几十秒都正常，所以超时给到 90 秒——别拿一个还没起来的超时去判「应用没起来」。
+  h="$(curl -s -m 90 "$URL/api/health" || true)"
   echo "    $(printf %s "$h" | grep -o '"mode": *"[a-z]*"' || echo '/api/health 没拿到 mode（应用没起来，看首页诊断文本）')"
   pid="$(printf %s "$h" | grep -o '"pid": *[0-9]*' | sed 's/[^0-9]//g' || true)"
   stale="$(printf %s "$h" | grep -o '"stale": *[a-z]*' | sed 's/.*: *//' || true)"

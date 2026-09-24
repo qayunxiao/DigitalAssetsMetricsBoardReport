@@ -322,10 +322,18 @@ stdout 也只在按需展开时显示；约束只有 `[report] daily_limit`（�
 2. 解到**站点根** `/usr/home/myaibtc/domains/myaibtc.serv00.net`（= `~/domains/...`，FreeBSD 上同处）：
    `tar -xf ~/damb-...zip`（FreeBSD 的 `tar` 就是 bsdtar，原生读 zip；兜底 `python -m zipfile -e <zip> <目标目录/>`）。
    第 1～3 步外加「重载 + 冒烟」已经写进根目录的 `deploy_app.sh`，站点根或 `~` 放着包时直接
-   `bash deploy_app.sh` 即可：它按「`api/app.py` 在不在 + 包是否比 `.deployed` 标记新」决定是解压部署还是只重载
-   （`--redeploy` 强制重解），解压前会把服务器上的 `config.ini` 备份成 `config.ini.bak.<时间戳>`。
+   `bash deploy_app.sh` 即可：**每次都重新铺一遍**跟踪文件（没有「比 `.deployed` 新才装」那种短路，
+   `--redeploy` 因此已是个只打印一句提示的空参数），铺之前会**先停一下应用**（2.5 步：TERM → 等 3 秒 →
+   没退的 `KILL -9`），装完再摸 `restart.txt`、由冒烟那第一个 `/api/health` 请求把它带回来。
+   停这一步的理由：几百个文件往站点根铺，旧进程一边占着几百 MB 内存（账户内存看过 96%）、一边可能在
+   并发请求里 import 到半抄的 `.py`；`cp` 是就地截断再写，不是原子替换。downtime 只有几秒。
+   `--no-stop` 跳过（想装完再自己挑时机重启时用）。serv00 没有 `devil www stop`，所以「停止」只能自己 kill
+   进程，匹配范围收在「本用户 + 命令行带本站域名 + 带 python」，并排掉 `deploy`（不然就是自杀）、`awk`、
+   `passenger-`（那是 Passenger 的 spawner）、`notify.py`（cron 正在发的日报，杀了白扔一轮上游）。
+   解压前会把服务器上的 `config.ini` 备份成 `config.ini.bak.<时间戳>`。
    **这个脚本不在上传包里**，要单独传（脚本自己覆盖自己会让 bash 读到半截，历史上真出过这种事故）。
-   注意它判断「服务在不在跑」只能用 `devil www list` 的 running/stopped —— Passenger 按需拉起，空闲时 `ps` 里一个进程都没有，别拿进程列表当判据。
+   注意「服务在不在跑」不能拿 `ps` 当判据（Passenger 按需拉起，空闲时一个进程都没有），也不能拿
+   `devil www list`（2026-09-24 实测那份输出只有域名/类型/路径三列，**没有状态列**）；看 `/api/health`。
 3. 站点根下面板自建的 `public_python/`（其 `public/` 是 nginx docroot）与 `public_php/` 里**不要留任何 HTML**，
    否则被 nginx 直出、绕过 `{{SHOW_FIX}}` 替换；`private_python/` 是另一套应用，**绝不往那儿丢 `passenger_wsgi.py`**（会抢它的入口）。
    由于 app root 到底认哪一层没有权威文档，保险做法是把同一份 `passenger_wsgi.py` 再拷进 `public_python/` 与
