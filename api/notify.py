@@ -20,12 +20,14 @@ Telegram 的 IP 白名单是按**服务器**算的，换出口会让 bot 被拒�
                                                        打印出来，并说明会不会被闸门挡；**不发**
   python api/notify.py --btc --send                     真发（给 `[notify] tg_bot` 那个机器人，`--bot` 可覆盖）
   python api/notify.py --btc --send --force             跳过「同一业务日只发一条」和每日额度（手工重发用）
-  python api/notify.py --html-alert                     跑一遍 [html_alert] 那三项定时监测：取数 + 三项判定 +
-                                                       组正文 + 顺带说清「真到 cron 那一刻会不会被闸门挡」；
-                                                       **不发、不记账**，所以随时可以跑来看数
-  python api/notify.py --html-alert --send              真发一条（cron 挂这条；时刻与阈值都在 indicator.ini）
+  python api/notify.py --html-alert                     跑一遍定时监测：顶部 [html_alert_top] + 底部
+                                                       [html_alert_bottom] **两段都判**（同一次取数、各判各的、
+                                                       各记各的账），打两张等宽表格 + 说清「真到 cron 那一刻
+                                                       会不会被闸门挡」；**不发、不记账**，所以随时可以跑来看数
+  python api/notify.py --html-alert-top                 只判顶部那一段（--html-alert-bottom 只判底部）
+  python api/notify.py --html-alert --send              真发（cron 挂这条；每段各一条，阈值在 indicator.ini 的对应段）
   python api/notify.py --html-alert --send --force      跳过「不早于 ALERT_AT」和「一个日历日只评一次」（手工补发用）
-  python api/notify.py --status                          只看本地那两条发送记录 + [html_alert] 生效阈值
+  python api/notify.py --status                          只看本地那几条发送记录 + 两段的生效阈值
                                                         （不打网络，最安全的自检）
 
 BTC → TG 的触发口径（2026-09-24 与用户定下的这一套，改就改下面三个常量与 `[notify]`）：
@@ -39,19 +41,24 @@ BTC → TG 的触发口径（2026-09-24 与用户定下的这一套，改就改�
 `data/notify_state.json` 只留**最近一条**已发记录：同一天换成第二个机器人再发，第一个机器人的「同业务日已发」
 就查不到了（日历日额度仍然管着）。真要让两个群各收一条，把 `daily_limit` 调到 2 并知道这是拿去重换的。
 
-`--html-alert` 是**另一条独立链路**（2026-09-24 用户要的功能：每天定点盯那三张卡），与上面那套极值播报互不影响：
-  · 三项监测 = AHR999 ≤ `AHR999_MAX`、恐慌贪婪 ≥ `FEAR_GREED_MIN`、2年MA乘数通道的**日线收盘** > 同一根上的支撑 730MA；
-    要求同时命中几项由 `ALERT_HITS` 说（默认 3 = 三项共振）。
-  · 阈值与每天的时刻都在根目录 `indicator.ini` 的 `[html_alert]` 段 —— 这是全站**唯一**一处判级数值放在 ini 里，
-    因为用户明示要「改配置不改代码」；顺序仍是 环境变量 `HTML_ALERT_*` > 该段 > 本模块 `ALERT_DEFAULTS`。
-    那份文件他会手改，要引用这几个数就先重读文件，别照抄代码默认。
+`--html-alert` 是**另一条独立链路**（2026-09-24 用户要的功能：每天定点盯那三张卡），与上面那套极值播报互不影响。
+它现在盯的是**两段**（同一批卡、两个方向的阈值，2026-09-24 用户第二次加的功能）：
+  · `[html_alert_top]`「可能顶部」= AHR999 ≤ `AHR999_MAX`、恐慌贪婪 ≥ `FEAR_GREED_MIN`、2年MA乘数通道的
+    **日线收盘** > 同一根上的支撑 730MA；`[html_alert_bottom]`「可能底部」= AHR999 ≤ `AHR999_MAX`、
+    恐慌贪婪 ≤ `FEAR_GREED_MAX`、**日线收盘** < 支撑 730MA。每段要求同时命中几项由该段的 `ALERT_HITS` 说
+    （默认 3 = 三项共振）。**同一次取数、各判各的、各记各的账**，两段各自触发就各自发一条（正文是等宽表格，
+    头条写清「命中几/几、要求几」）。
+  · 阈值与每天的时刻都在根目录 `indicator.ini` 的对应段里 —— 这是全站**唯一**一处判级数值放在 ini 里，
+    因为用户明示要「改配置不改代码」；顺序仍是 环境变量（`HTML_ALERT_TOP_*` / `HTML_ALERT_BOTTOM_*`）
+    > 该段 > 本模块 `ALERT_SPEC[...]["defaults"]`。那份文件他会手改，要引用这几个数就先重读文件，别照抄代码默认。
   · 取数与页面同源（`btc.summary()`，**永不穿透上游缓存**：cron 每分钟拉起一次，穿透会把上游打爆）；
-    本模块只比大小，不重算指标、不补估算值 —— 取不到数的那项**既不算满足、也照样占 `ALERT_HITS` 的额**
-    （写着 3 就要三项都成立，缺一项当天就是不发，正文里单列进「缺口」）。代价：某项长期挂掉会让本条长期
+    本模块只比大小，不重算指标、不补估算值 —— 取不到数的那项**既不算满足、也照样占该段 `ALERT_HITS` 的额**
+    （写着 3 就要三项都成立，缺一项当天就是不发，表格里单列进「缺口」）。代价：某项长期挂掉会让本段长期
     沉默，所以缺口一定要打印出来；宁可把 `ALERT_HITS` 调小，也别在代码里给缺数硬编一个判定。
-  · 闸门两条，**都走在取数前面**（`--send` 那条被挡时连上游都不打）：① 不早于 `ALERT_AT`（留空 = 不限时刻）；
-    ② 一个日历日只评一次 —— 触发发了要记，没触发也要记「今天评过了」，这样 cron 每分钟拉起一天也只打一次上游。
-    记在 `data/notify_html_state.json`（与 --btc 那份各记各的，互不消耗）。**预览一条都不记**，
+  · 闸门两条，**都走在取数前面**（`--send` 那条被挡时连上游都不打）：① 不早于该段 `ALERT_AT`（留空 = 不限时刻）；
+    ② 该段一个日历日只评一次 —— 触发发了要记，没触发也要记「今天评过了」，这样 cron 每分钟拉起一天也只打一次上游。
+    记在 `data/notify_html_top_state.json` / `..._bottom_state.json`（与 --btc 那份各记各的，互不消耗；
+    两段之间也各记各的，否则顶部评过一次会把当天的底部评估一起挡掉）。**预览一条都不记**，
     看一眼配置就把当天该发的提示哑掉，是最坏的一种手滑；真发失败同样不记，下一分钟的 cron 自己再试。
     收件人取 `[notify] tg_bot`（`--bot` 可覆盖），但**不消耗** `[notify] daily_limit`（那条只管 --btc）。
   · 时刻按跑脚本那台机器的本地时区解释，本机与 serv00 不一定同一小时，配置段里写了怎么核对。
@@ -63,6 +70,7 @@ BTC → TG 的触发口径（2026-09-24 与用户定下的这一套，改就改�
 import json
 import os
 import re
+import unicodedata
 import urllib.parse
 import urllib.request
 from datetime import date, datetime
@@ -241,38 +249,66 @@ def run_btc(do_send=False, bot=None, force=False):
 
 
 # ============================== 页面指标定时播报（--html-alert）==============================
-# 阈值住在根目录 `indicator.ini` 的 `[html_alert]` 段（2026-09-24 用户明示：这几档要能改配置不改代码，
-# 连每天几点跑也一样）。这是全站**唯一**一处判级数值放在 ini 里的地方——其余口径仍在代码常量，见 Qoder.md。
+# 阈值住在根目录 `indicator.ini` 的 `[html_alert_top]` / `[html_alert_bottom]` 两段（2026-09-24 用户明示：
+# 这几档要能改配置不改代码，连每天几点跑也一样；同一天第二次改口径：顶部底部拆成两段各自判、各自发）。
+# 这是全站**唯一**一处判级数值放在 ini 里的地方——其余口径仍在代码常量，见 Qoder.md。
 # 判定读的是 `api/btc.py` 那三张卡自己的头条值（与 staic/btc.html 上看到的一模一样），本模块只比大小、不重算指标。
 
-ALERT_SECT = "html_alert"
-ALERT_ENV = {"ALERT_AT": "HTML_ALERT_AT", "ALERT_HITS": "HTML_ALERT_HITS",
-             "AHR999_MAX": "HTML_ALERT_AHR999_MAX", "FEAR_GREED_MIN": "HTML_ALERT_FEAR_GREED_MIN",
-             "TWM_CLOSE_ABOVE_SUPPORT": "HTML_ALERT_TWM_ABOVE"}
-# 代码默认 = 用户 2026-09-24 口头给的那一组（08:10 / 三项全中 / AHR999≤0.57 / 恐慌≥70 / 收盘>730MA）。
-# 它只在 `[html_alert]` 整段缺失或那份文件解析不了时兜底；平时生效的是文件里的值，而那文件他会手改——
-# **要引用这几个数，先重读 indicator.ini，别照抄这里**。
-ALERT_DEFAULTS = {"ALERT_AT": "08:10", "ALERT_HITS": "3", "AHR999_MAX": "0.57",
-                  "FEAR_GREED_MIN": "70", "TWM_CLOSE_ABOVE_SUPPORT": "1"}
-HTML_STATE_FILE = os.path.join(ROOT, "data", "notify_html_state.json")
+ALERT_SECTS = ("top", "bottom")
+# 每段 = 一份 indicator.ini 配置节 + 一个 env 前缀 + 一份当天记账文件 + 一组判定项。
+# `items` 四元组 = (ini 里的键, api/btc.py 的卡 key, 正文里的标签, 判定方向)：
+#   `<=` / `>=` 比数值阈值；`above` / `below` 比「日线收盘 vs 同一根上的支撑 730MA」（这项没有数值阈值，1=启用/留空=停用）。
+# 两段**同一次取数、各判各的、各记各的账**（状态文件分开，否则顶部那条评过会把底部那条挡掉）。
+ALERT_SPEC = {
+    "top": {
+        "sect": "html_alert_top", "env": "HTML_ALERT_TOP", "title": "可能顶部",
+        "state": os.path.join(ROOT, "data", "notify_html_top_state.json"),
+        "items": (("AHR999_MAX", "ahr999", "AHR999 定投指数", "<="),
+                  ("FEAR_GREED_MIN", "fear", "恐慌贪婪指数", ">="),
+                  ("TWM_CLOSE_ABOVE_SUPPORT", "two_year_multiply", "2年MA乘数通道", "above")),
+        "defaults": {"ALERT_AT": "08:10", "ALERT_HITS": "3", "AHR999_MAX": "0.57",
+                     "FEAR_GREED_MIN": "70", "TWM_CLOSE_ABOVE_SUPPORT": "1"},
+    },
+    "bottom": {
+        "sect": "html_alert_bottom", "env": "HTML_ALERT_BOTTOM", "title": "可能底部",
+        "state": os.path.join(ROOT, "data", "notify_html_bottom_state.json"),
+        "items": (("AHR999_MAX", "ahr999", "AHR999 定投指数", "<="),
+                  ("FEAR_GREED_MAX", "fear", "恐慌贪婪指数", "<="),
+                  ("TWM_CLOSE_BELOW_SUPPORT", "two_year_multiply", "2年MA乘数通道", "below")),
+        "defaults": {"ALERT_AT": "08:10", "ALERT_HITS": "3", "AHR999_MAX": "0.4",
+                     "FEAR_GREED_MAX": "25", "TWM_CLOSE_BELOW_SUPPORT": "1"},
+    },
+}
 ALERT_MARK = {"hit": "✓", "miss": "✗", "gap": "—", "off": "·"}
 
 
-def alert_cfg():
-    """五个键的生效值：**环境变量 > indicator.ini `[html_alert]` > `ALERT_DEFAULTS`**。
+def _alert_env(which, key):
+    """该段某个键对应的环境变量名：`ALERT_AT` → `HTML_ALERT_TOP_AT`（时刻那条不带键名，读起来像人话，
+    也是 `alert_cron.sh` 与 indicator.ini 注释里写死的那两个名字），其余键 → `HTML_ALERT_TOP_<键>`。
+    改这一行的口径必须同时改 `alert_cron.sh` 那两条 export —— 对不上就是「脚本设空了个没人读的变量，
+    ini 里的时刻照样生效」，2026-09-24 离线自检抓到的正是这个形状。"""
+    p = ALERT_SPEC[which]["env"]
+    return "%s_AT" % p if key == "ALERT_AT" else "%s_%s" % (p, key)
 
+
+def alert_cfg(which):
+    """该段各键的生效值：**环境变量 > indicator.ini 的那一段 > `ALERT_SPEC[which]["defaults"]`**。
+
+    env 名见 `_alert_env`（`HTML_ALERT_TOP_AHR999_MAX` / `HTML_ALERT_BOTTOM_FEAR_GREED_MAX`…），
+    两段共用同名键（`AHR999_MAX`、`ALERT_HITS`、`ALERT_AT`）靠前缀区分，不再用以前那个不带段的 `HTML_ALERT_*`。
     值为空串原样返回（那是他显式停用本项），不会被默认值顶回来；只有键根本不存在才落默认。
     env 那一侧默认按「设了但设空 = 没设」处理，与 `apply_config()` 同一规矩 —— **只有 `ALERT_AT` 例外**：
-    它在 ini 里留空的语义本来就是「不设时刻」（见 `html_gate`），所以 `HTML_ALERT_AT=""` 也照这个语义走。
+    它在 ini 里留空的语义本来就是「不设时刻」（见 `html_gate`），所以设空也照这个语义走。
     `alert_cron.sh` 靠这个口子把「几点跑」整个交给 crontab 那五个字段，脚本自己不再判时刻。"""
+    sp = ALERT_SPEC[which]
     out = {}
-    for k, dv in ALERT_DEFAULTS.items():
-        ev = os.environ.get(ALERT_ENV[k])
+    for k in ("ALERT_AT", "ALERT_HITS") + tuple(i[0] for i in sp["items"]):
+        ev = os.environ.get(_alert_env(which, k))
         if k == "ALERT_AT" and ev is not None:
             out[k] = ev.strip()                      # 显式设空 = 不设时刻；有值则覆盖 ini
             continue
         ev = (ev or "").strip()
-        out[k] = ev if ev else indicator_get(ALERT_SECT, k, dv)
+        out[k] = ev if ev else indicator_get(sp["sect"], k, sp["defaults"][k])
     return out
 
 
@@ -310,8 +346,8 @@ def alert_band_last(item):
     return None, None, None
 
 
-def alert_checks(cfg, items):
-    """三项判定 → `(checks, needed)`。每项 `{key,label,cur,thr,asof,state[,why]}`，
+def alert_checks(cfg, items, which):
+    """该段的逐项判定 → `(checks, needed)`。每项 `{key,label,cur,thr,asof,state[,why]}`，
     `state` 取 hit（满足）/ miss（不满足）/ gap（取不到数，**既不算满足也不算不满足**）/ off（本项停用）；
     `needed` = 要求命中的项数，只在「启用」的项里算——**gap 仍然占额**：写着 3 就是三项都要成立，
     有一项没数就当天不发（宁缺不估）。代价是一条链长期挂着会让播报静默哑掉，
@@ -338,14 +374,15 @@ def alert_checks(cfg, items):
         return {"key": key, "label": label, "cur": fmt_val(it), "thr": cond, "asof": it.get("asof"),
                 "state": "hit" if (v <= thr if op == "<=" else v >= thr) else "miss"}
 
-    def band_item(on_s):
-        key, label = "two_year_multiply", "2年MA乘数通道"
+    def band_item(on_s, direction, label="2年MA乘数通道"):
+        key = "two_year_multiply"
         sw = _fthr(on_s)
         if sw is None or sw <= 0:
             return {"key": key, "label": label, "cur": "—",
-                    "thr": "—（本项停用：TWM_CLOSE_ABOVE_SUPPORT 非 1）", "asof": None, "state": "off"}
+                    "thr": "—（本项停用：TWM_CLOSE_%s_SUPPORT 非 1）" % ("ABOVE" if direction == "above" else "BELOW"),
+                    "asof": None, "state": "off"}
         it = by.get(key) or {}
-        cond = "日线收盘 > 支撑 730MA"
+        cond = "收盘 %s 支撑730MA" % (">" if direction == "above" else "<")
         if not it:
             return {"key": key, "label": label, "cur": "—", "thr": cond, "asof": None,
                     "state": "gap", "why": "响应里没有这张卡"}
@@ -357,43 +394,64 @@ def alert_checks(cfg, items):
             return {"key": key, "label": label, "cur": "—", "thr": cond, "asof": None, "state": "gap",
                     "why": "bands 里没有一根同时有收盘与支撑（Yahoo 收盘或 looknode 通道缺数）"}
         return {"key": key, "label": label,
-                "cur": "$%s（收盘）vs $%s（支撑）" % (format(px, ",.0f"), format(lo, ",.0f")),
-                "thr": cond, "asof": d, "state": "hit" if px > lo else "miss"}
+                "cur": "收盘$%s｜支撑$%s" % (format(px, ",.0f"), format(lo, ",.0f")),
+                "thr": cond, "asof": d, "state": "hit" if (px > lo) == (direction == "above") else "miss"}
 
-    checks = [num_item("ahr999", "AHR999 定投指数", cfg["AHR999_MAX"], "<="),
-              num_item("fear", "恐慌贪婪指数", cfg["FEAR_GREED_MIN"], ">="),
-              band_item(cfg["TWM_CLOSE_ABOVE_SUPPORT"])]
+    checks = []
+    for k, card, label, op in ALERT_SPEC[which]["items"]:
+        checks.append(band_item(cfg[k], op, label) if op in ("above", "below")
+                      else num_item(card, label, cfg[k], op))
     on = [c for c in checks if c["state"] != "off"]
     want = _fthr(cfg["ALERT_HITS"])
     needed = len(on) if want is None else max(1, min(int(want), max(1, len(on))))
     return checks, needed
 
 
-def alert_text(checks, needed, biz):
-    """正文：头条一句「命中几/几、要求几」，下面把**三项全列**（含没命中的与缺的），末尾一句缺口。
+def _dwidth(s):
+    """显示宽度：东亚全角字符在 Telegram 的等宽代码块里占两列，按字符数对齐会歪。"""
+    return sum(2 if unicodedata.east_asian_width(c) in ("W", "F") else 1 for c in str(s))
 
-    停用项也列，标 `·`，这样从消息本身就能看出当时那五个阈值是什么状态，不必去翻服务器上的 ini。"""
-    hits = [c for c in checks if c["state"] == "hit"]
-    on = [c for c in checks if c["state"] != "off"]
-    lines = ["我爱大饼 · 指标提示 %s（业务日 %s · 命中 %d/%d 项，要求 %d 项）"
-             % (date.today().isoformat(), biz, len(hits), len(on), needed)]
-    for c in checks:
-        lines.append("%s %s：%s｜%s%s" % (ALERT_MARK[c["state"]], c["label"], c["cur"], c["thr"],
-                                          "（asof %s）" % c["asof"] if c["asof"] else ""))
+
+def _pad(s, w):
+    s = str(s)
+    return s + " " * max(0, w - _dwidth(s))
+
+
+def alert_table(checks, title, biz, needed):
+    """把一段的判定打成**等宽表格**（Telegram 侧靠代码块渲染才对齐；见 `send(mono=True)`）。
+
+    列宽按实际内容现算，不写死：标签里既有「AHR999 定投指数」也有「恐慌贪婪指数」，写死一定歪。
+    停用的项（`·`）也照样列出来，读消息的人能从表里直接看到「这项当时是没配还是配了没中」。"""
+    head = ("我爱大饼 · 指标提示｜%s（业务日 %s · 命中 %d/%d 项，要求 %d 项）"
+            % (title, biz, sum(1 for c in checks if c["state"] == "hit"),
+               sum(1 for c in checks if c["state"] != "off"), needed))
+    cols = (("状态", lambda c: ALERT_MARK[c["state"]]),
+            ("指标", lambda c: c["label"]),
+            ("当前值", lambda c: c["cur"]),
+            ("条件", lambda c: c["thr"]),
+            ("数据日期", lambda c: c["asof"] or "—"))
+    rows = [[f(c) for _, f in cols] for c in checks]
+    ws = [max([_dwidth(h) for h, _ in cols] + [_dwidth(r[i]) for r in rows]) for i in range(len(cols))]
+    lines = [head, ""]
+    lines.append("  ".join(_pad(h, ws[i]) for i, (h, _) in enumerate(cols)).rstrip())
+    lines.append("  ".join("-" * ws[i] for i in range(len(cols))))
+    for r in rows:
+        lines.append("  ".join(_pad(v, ws[i]) for i, v in enumerate(r)).rstrip())
     gaps = "；".join("%s：%s" % (c["label"], c["why"]) for c in checks if c["state"] == "gap")
-    lines.append("缺口：%s" % (gaps or "无"))
+    lines.append("\n缺口：%s" % (gaps or "无"))
     return "\n".join(lines)
 
 
-def html_gate(cfg, now=None, force=False):
-    """→ `(能发, 原因)`。两条闸门：① 不早于 `ALERT_AT`；② 一个日历日只评估一次。
+def html_gate(cfg, state_path, now=None, force=False):
+    """→ `(能发, 原因)`。两条闸门：① 不早于 `ALERT_AT`；② 一个日历日只评估一次（本段自己那份账）。
 
     **这一关在取数之前**（cron 每分钟拉起一次，没到点／当天已评过时连上游都不打，直接退出）。
     ①判的是「现在 >= 目标时刻」而不是「正好等于那一分钟」：到点后第一次评、评过之后当天不再评；
     万一 08:10 那分钟机器没起来，08:11 之后仍会补上，不会整天空过。
     `ALERT_AT` 留空 = 不设时刻（这时本闸门只剩②，等于「服务一起来就评一次」）。
     时刻格式不对一律**不发**并说清原因——每分钟一次的 cron 会把「猜错时刻」放大成刷屏。
-    本路径**不读** `[notify] daily_limit`（那是 --btc 的额度），②自己就封顶了。"""
+    本路径**不读** `[notify] daily_limit`（那是 --btc 的额度），②自己就封顶了。
+    账本按段分开（`state_path`）：顶部那条评过不能把底部那条挡在门外。"""
     if force:
         return True, "（--force：跳过时刻与当日一条的限制，仍然会记一笔已发）"
     now = now or datetime.now()
@@ -404,7 +462,7 @@ def html_gate(cfg, now=None, force=False):
             return False, "ALERT_AT=%r 不是 hh:mm，没发（改对，或整行留空表示不设时刻）" % at
         if now.hour * 60 + now.minute < t[0] * 60 + t[1]:
             return False, "还没到 %s（现在 %02d:%02d），没发" % (at, now.hour, now.minute)
-    st = _state(HTML_STATE_FILE)
+    st = _state(state_path)
     if st.get("day") == now.date().isoformat():
         done = ("已经发过一条（%s，bot=%s，message_id=%s）" % (st.get("sent_at"), st.get("bot"), st.get("message_id"))
                 if st.get("sent") else "已经评估过一次（%s，bot=%s，当时没到触发条件）"
@@ -413,78 +471,103 @@ def html_gate(cfg, now=None, force=False):
     return True, ""
 
 
-def run_html_alert(do_send=False, bot=None, force=False, now=None):
-    """定时播报的完整一条链：过闸门 → 取数（与页面同源）→ 三项判定 → 够数才发 → 记「今天评过了」。
+def _alert_section(which, cfg, out, do_send, bot):
+    """一段（顶部或底部）的判定 → 打表 → 够数才发 → 记本段当天的账。返回退出码。
 
-    与 `run_btc` 同一套规矩：不传 `--send` 一律不发；形参叫 `do_send` 不叫 `send`（别盖掉模块级那个发信函数）；
-    `now` 只是给自检/测试留的假时钟，取数**永远不穿透上游缓存**（cron 每分钟一次，穿透会把上游打爆）。
-
-    「评过就记账」只发生在 `--send` 那条路上：预览跑一百遍也不会把当天的真播报哑掉——
-    手滑看一眼配置，结果那天该发的提示没了，比多看一眼日志糟得多。真发但**失败**同样不记账，
-    下一分钟的 cron 自己会再试；`--btc` 那条则是失败不消耗额度、成功后按日历日计数。"""
-    cfg = alert_cfg()
-    bot = (bot or cfg_bot() or "").strip().upper()
-    print("[html_alert] 生效阈值（环境变量 > indicator.ini > 代码默认）：" +
-          "  ".join("%s=%s" % (k, cfg[k] or "(空)") for k in ALERT_DEFAULTS))
-    if do_send:
-        # 只有 cron 那条（带 --send）让闸门把**取数**一起挡掉：没到点／当天已评过时一分钟一次也不打上游。
-        ok, why = html_gate(cfg, now, force)
-        if not ok:
-            print("闸门：%s（**没取数、没发**）" % why)
-            return 0
-        if why:
-            print(why)
-    else:
-        # 预览不设闸：看一眼「现在这三项各是什么状态」是本功能最常用的用法，
-        # 而闸门在预览这条路上挡不出任何后果（它从不发信），只会挡得你看不到数。
-        g_ok, g_why = html_gate(cfg, now, force)
-        print("预览：闸门不参与（这条路径永远不发信），真到 cron 那一刻的判定是 %s"
-              % ("放行" if g_ok else "「%s」" % g_why))
-    out = btc_summary()
-    if not out.get("ok"):
-        print("BTC 取数全部失败，三项都没数，一条都不发：%s" % (out.get("error") or out.get("failed")))
-        return 1                                        # 整条链挂了不记账：下一分钟重试
-    checks, needed = alert_checks(cfg, out.get("items"))
-    print("取数 %d/%d 项有数，用时 %sms" % (out["count"]["ok"], out["count"]["total"], out.get("elapsed_ms")))
-    for c in checks:
-        print("  %s %-18s %-34s %-16s %s"
-              % (ALERT_MARK[c["state"]], c["label"], c["cur"], c["thr"], c.get("why") or "asof " + str(c["asof"] or "—")))
+    退出码沿用整条链的口径：0 = 没触发／已发出／闸门挡；1 = 取数或发送失败（**不记账**）；
+    2 = 触发了但没配收件人（也不记账，装错了不该把当天的播报一起吞掉）。"""
+    sp = ALERT_SPEC[which]
+    checks, needed = alert_checks(cfg, out.get("items"), which)
     on = [c for c in checks if c["state"] != "off"]
     hits = [c for c in on if c["state"] == "hit"]
     got = [c for c in on if c["state"] in ("hit", "miss")]
     biz = biz_date([c for c in on if c["asof"]])
+    print("\n=== [%s] %s ===" % (sp["sect"], sp["title"]))
     if not on:
-        print("\n三项在 [html_alert] 里全被停用了 —— 没东西可判。")
-    else:
-        print("\n命中 %d/%d 项，要求 %d 项（有数可判 %d 项）" % (len(hits), len(on), needed, len(got)))
-    text = alert_text(checks, needed, biz) if hits else ""
+        print("本段判定项全被停用了 —— 没东西可判（要么把阈值填上，要么整段别挂 cron）。")
+        return 0
+    table = alert_table(checks, sp["title"], biz, needed)
+    print(table)
+    print("（有数可判 %d 项，共 %d 项启用）" % (len(got), len(on)))
     enough = bool(on) and len(got) >= needed and len(hits) >= needed
     if not enough:
-        if on and len(got) < needed:
+        if len(got) < needed:
             print("有数的项不够要求数（还差 %d 项）—— 按「宁缺不估」不发。"
-                  "某项长期取不到数会让本条长期沉默：要么修源，要么把 ALERT_HITS 调小。" % (needed - len(got)))
-        elif on:
+                  "某项长期取不到数会让本段长期沉默：要么修源，要么把该段的 ALERT_HITS 调小。" % (needed - len(got)))
+        else:
             print("没到触发条件 —— 不发。这是「不播」的正常结果，别为了有点动静去放阈值。")
-        if do_send and on:                              # 评过了就记一笔，当天不再打上游
-            _consume(bot or cfg_bot(), biz, None, HTML_STATE_FILE, fired=False)
-            print("已记「%s 评估过（未触发）」——今天这一条链不会再打上游；要手工重评加 --force。" % biz)
-        elif not do_send and on:
+        if do_send:                               # 评过了就记一笔，当天不再打上游
+            _consume(bot or cfg_bot(), biz, None, sp["state"], fired=False)
+            print("已记「%s %s 评估过（未触发）」——本段今天不会再打上游；手工重评加 --force。"
+                  % (biz, sp["sect"]))
+        else:
             print("预览模式，**一条都没发**，也**不记账**（今天该评的还会照常被 cron 评一次）。")
         return 0
-    print("\n触发 %d 项（业务日 %s），正文 %d 字：\n%s\n" % (len(hits), biz, len(text), text))
     if not bot:
-        print("没配发给谁：--bot QA 指定，或在 config.ini 的 [notify] tg_bot 写死。一条都没发。")
-        return 2                                        # 装错了不该把当天的播报一起吞掉：不记账
+        print("触发 %d 项但没配发给谁：--bot QA 指定，或在 config.ini 的 [notify] tg_bot 写死。一条都没发。" % len(hits))
+        return 2
     if not do_send:
-        print("预览模式，**一条都没发**（要发到 %s 加 --send）。" % bot)
+        print("预览模式：这条要发到 %s 加 --send（正文就是上面那张表）。" % bot)
         return 0
-    r = send(text, bot)
+    r = send(table, bot, mono=True)
     if r.get("ok"):
-        _consume(bot, biz, r.get("message_id"), HTML_STATE_FILE)
-        print("已发送 bot=%s chat=%s message_id=%s" % (bot, bot_cfg(bot)[2], r.get("message_id")))
+        _consume(bot, biz, r.get("message_id"), sp["state"])
+        print("已发送 [%s] bot=%s chat=%s message_id=%s" % (which, bot, bot_cfg(bot)[2], r.get("message_id")))
+        return 0
+    print("发送失败 [%s] bot=%s：%s（没记账，下一次 cron 还会自己试）" % (which, bot, r.get("error")))
+    return 1
+
+
+def run_html_alert(do_send=False, bot=None, force=False, now=None, which=None):
+    """定时播报的完整一条链：过闸门 → **一次取数** → 顶部/底部各自判定 → 各自够数才各自发 → 各自记账。
+
+    与 `run_btc` 同一套规矩：不传 `--send` 一律不发；形参叫 `do_send` 不叫 `send`（别盖掉模块级那个发信函数）；
+    `now` 只是给自检/测试留的假时钟，取数**永远不穿透上游缓存**（cron 每分钟一次，穿透会把上游打爆）。
+
+    两段共用一次 `btc_summary()`：那三张卡本来就在同一次响应里，各段只是拿同一批数比不同方向的阈值，
+    分两次取数等于把上游打两遍。**闸门仍走在取数前面**，而且是「两段都被挡」才不打上游 ——
+    所以 `--send` 那条路上：两段各自判闸门，全挡就零上游退出，只要有一段放行就打一次数、只评那一段。
+
+    「评过就记账」只发生在 `--send` 那条路上，而且**各段记各的账**（`data/notify_html_top_state.json` /
+    `..._bottom_state.json`）：预览跑一百遍也不会把当天的真播报哑掉——手滑看一眼配置，结果那天该发的
+    提示没了，比多看一眼日志糟得多。真发但**失败**同样不记账，下一分钟的 cron 自己会再试；
+    `--btc` 那条则是失败不消耗额度、成功后按日历日计数。"""
+    sects = ALERT_SECTS if which is None else (which,)
+    bot = (bot or cfg_bot() or "").strip().upper()
+    cfgs = {}
+    for w in sects:
+        cfg = alert_cfg(w)
+        cfgs[w] = cfg
+        print("[%s] 生效阈值（环境变量 > indicator.ini > 代码默认）：%s"
+              % (w, "  ".join("%s=%s" % (k, cfg[k] or "(空)")
+                              for k in ("ALERT_AT", "ALERT_HITS") + tuple(i[0] for i in ALERT_SPEC[w]["items"]))))
+    if do_send:
+        # 只有 cron 那条（带 --send）让闸门把**取数**一起挡掉：两段全被挡时一分钟一次也不打上游。
+        live = []
+        for w in sects:
+            ok, why = html_gate(cfgs[w], ALERT_SPEC[w]["state"], now, force)
+            if ok:
+                live.append(w)
+            else:
+                print("闸门 [%s]：%s（本段**没取数、没发**）" % (w, why))
+        if not live:
+            return 0
+        sects = live
     else:
-        print("发送失败 bot=%s：%s（没记账，下一次 cron 还会自己试）" % (bot, r.get("error")))
-    return 0 if r.get("ok") else 1
+        # 预览不设闸：看一眼「现在各段是什么状态」是本功能最常用的用法，
+        # 而闸门在预览这条路上挡不出任何后果（它从不发信），只会挡得你看不到数。
+        for w in sects:
+            g_ok, g_why = html_gate(cfgs[w], ALERT_SPEC[w]["state"], now, force)
+            print("预览 [%s]：闸门不参与（这条路径永远不发信），真到 cron 那一刻的判定是 %s"
+                  % (w, "放行" if g_ok else "「%s」" % g_why))
+    out = btc_summary()
+    if not out.get("ok"):
+        print("BTC 取数全部失败，两段都没数，一条都不发：%s" % (out.get("error") or out.get("failed")))
+        return 1                                        # 整条链挂了不记账：下一分钟重试
+    print("取数 %d/%d 项有数，用时 %sms（两段共用这一次取数）"
+          % (out["count"]["ok"], out["count"]["total"], out.get("elapsed_ms")))
+    rcs = [_alert_section(w, cfgs[w], out, do_send, bot) for w in sects]
+    return 1 if 1 in rcs else (2 if 2 in rcs else 0)
 
 
 def bot_cfg(name=None):
@@ -536,20 +619,30 @@ def whoami(name=None):
             "name": u.get("first_name"), "chat_id": chat}
 
 
-def send(text, name=None):
+def send(text, name=None, mono=False):
     """真发一条文本到该机器人的默认 chat_id。返回 `{ok, bot, message_id|error}`。
 
-    没有 `parse_mode`：Markdown/HTML 里一个裸 `_` 或 `<` 就整条 400，指标播报里到处是这种字符，
-    纯文本比「为了好看而多一套转义」值当。过长按 Telegram 的上限截断并标注，不让它整条失败。"""
+    默认**没有** `parse_mode`：Markdown/HTML 里一个裸 `_` 或 `<` 就整条 400，指标播报里到处是这种字符，
+    纯文本比「为了好看而多一套转义」值当。过长按 Telegram 的上限截断并标注，不让它整条失败。
+
+    `mono=True` 是给「等宽表格」用的唯一例外（`alert_table` 那条正文）：Telegram 的普通消息里空格会被
+    折叠、 proportional 字体也不对齐，表格会变成一坨。所以整条包进 ``` 代码块 + `parse_mode=Markdown`
+    ——进了代码块的内容不再被解析，正文里那些 `_`/`<` 反而安全了。代价：正文一旦出现三个连续反引号，
+    代码块会提前闭合，所以这里在包之前先把它换掉（表格本身不产反引号，属于兜底）。"""
     key, token, chat, why = bot_cfg(name)
     if why:
         return {"ok": False, "bot": key, "error": why}
     body = (text or "").strip()
     if not body:
         return {"ok": False, "bot": key, "error": "空文本，没发"}
-    if len(body) > TEXT_LIMIT:
-        body = body[:TEXT_LIMIT - 20] + "…（已截断，原长 %d）" % len(body)
-    r = _api("sendMessage", token, {"chat_id": chat, "text": body, "disable_web_page_preview": "true"})
+    cap = TEXT_LIMIT - (12 if mono else 0)               # 代码块的围栏与换行也占那 4096
+    if len(body) > cap:
+        body = body[:cap - 20] + "…（已截断，原长 %d）" % len(body)
+    params = {"chat_id": chat, "text": body, "disable_web_page_preview": "true"}
+    if mono:
+        params["text"] = "```\n%s\n```" % body.replace("```", "` ` `")
+        params["parse_mode"] = "Markdown"
+    r = _api("sendMessage", token, params)
     if not r.get("ok"):
         log.warning("[notify] TG 发送失败 bot=%s：%s", key, r.get("error"))
         return {"ok": False, "bot": key, "error": r.get("error")}
@@ -577,27 +670,33 @@ def main(argv):
     """命令行：默认只探活 + 预览，`--send` 才真发（见模块注释里那条教训）。"""
     send_it = "--send" in argv
     name = _arg(argv, "--bot")
-    if "--status" in argv:                            # 纯本地：读那两条发送记录 + 回显生效阈值，不打上游、不打 bot API
+    if "--status" in argv:                            # 纯本地：读那几条发送记录 + 回显生效阈值，不打上游、不打 bot API
         st = _state()
         print("极值播报（--btc）发送记录：%s" % (json.dumps(st, ensure_ascii=False) if st
                                                 else "空（`data/notify_state.json` 还没有，说明这台机器没真发过）"))
         print("今日限额 %d 条（`[notify] daily_limit`）；默认机器人 %s（`[notify] tg_bot`）"
               % (daily_limit(), cfg_bot() or "未配置"))
-        hs = _state(HTML_STATE_FILE)
-        print("定时播报（--html-alert）当天记录：%s"
-              % (("%s %s（bot=%s，业务日 %s）" % (hs["day"], "已发 message_id=%s" % hs.get("message_id")
-                                                 if hs.get("sent") else "已评估过、当时未触发",
-                                                 hs.get("bot"), hs.get("biz_date")))
-                 if hs else "空（`data/notify_html_state.json` 还没有，说明这台机器没跑过 --send）"))
-        ac = alert_cfg()
-        print("[html_alert] 生效阈值（环境变量 > indicator.ini > 代码默认）：%s"
-              % json.dumps(ac, ensure_ascii=False))
-        print("  时刻 %s ｜ 要求命中 %s 项（留空=有几项算几项全中）；这一路径不吃 daily_limit，"
-              "一个日历日只评一次（没触发的日子也算评过）"
-              % (ac["ALERT_AT"] or "不限（不设时间闸门）", ac["ALERT_HITS"] or "全部"))
+        for w in ALERT_SECTS:
+            sp = ALERT_SPEC[w]
+            hs = _state(sp["state"])
+            print("\n定时播报 [%s]（%s）当天记录：%s"
+                  % (sp["sect"], sp["title"],
+                     ("%s %s（bot=%s，业务日 %s）" % (hs["day"], "已发 message_id=%s" % hs.get("message_id")
+                                                      if hs.get("sent") else "已评估过、当时未触发",
+                                                      hs.get("bot"), hs.get("biz_date")))
+                     if hs else "空（`data/notify_html_%s_state.json` 还没有，说明这台机器没跑过 --send）" % w))
+            ac = alert_cfg(w)
+            print("  生效阈值（环境变量 > indicator.ini > 代码默认）：%s" % json.dumps(ac, ensure_ascii=False))
+            print("  时刻 %s ｜ 要求命中 %s 项（留空=有几项算几项全中）；这一路径不吃 daily_limit，"
+                  "一个日历日只评一次（没触发的日子也算评过）"
+                  % (ac["ALERT_AT"] or "不限（不设时间闸门）", ac["ALERT_HITS"] or "全部"))
         return 0
     if "--btc" in argv:
         return run_btc(send_it, name, force="--force" in argv)
+    if "--html-alert-top" in argv:
+        return run_html_alert(send_it, name, force="--force" in argv, which="top")
+    if "--html-alert-bottom" in argv:
+        return run_html_alert(send_it, name, force="--force" in argv, which="bottom")
     if "--html-alert" in argv:
         return run_html_alert(send_it, name, force="--force" in argv)
     text = _arg(argv, "--text") or ""

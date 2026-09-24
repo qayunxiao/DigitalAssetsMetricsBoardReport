@@ -5,8 +5,14 @@ data/report_quota.json
 # data/notify_state.json 是 TG 播报的去重与每日限额记录（api/notify.py），同样是运行期状态：
 # 换机器本来就该重算（当天没发过就是没发过），所以不入库；删掉它最坏的后果是今天多播一条。
 data/notify_state.json
-# data/notify_html_state.json 是页面指标定时播报（api/notify.py 的 --html-alert）那条「今天评过了」的记录：
-# 同样是运行期状态，不入库。删掉它最坏的后果是当天多评一次上游／多播一条。两份记录各记各的，互不消耗额度。
+# data/notify_html_top_state.json / ..._bottom_state.json 是页面指标定时播报（api/notify.py 的 --html-alert）
+# 那**两段**各自「今天评过了」的记录：同样是运行期状态，不入库。删掉它最坏的后果是当天多评一次上游／多播一条。
+# 分两本是故意的（2026-09-24 拆 top/bottom）：一本账会让「顶部那条评过」把当天的底部评估一起挡在门外。
+# 三段记录（--btc、top、bottom）各记各的，互不消耗额度。
+data/notify_html_top_state.json
+data/notify_html_bottom_state.json
+# 以前那一本单段账（2026-09-24 之前的 data/notify_html_state.json）不再被读写，留着也只是垃圾；ignore 保留一行，
+# 免得谁在旧服务器上看见它以为还有用——新账本的名字才是这两个。
 data/notify_html_state.json
 # data/daycache/ 是磁盘日缓存（api/core.py 的 cached()）：每个键一份「本进程今天取到的原始结果」，
 # 体积到 MB 级、且换机/换网络后本来就该重新取，所以不入库。删掉整个目录没有后果——下次取数会重建。

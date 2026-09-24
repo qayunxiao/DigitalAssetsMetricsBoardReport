@@ -93,11 +93,11 @@ def apply_config():
 
 HAS_CONFIG = apply_config()
 
-# ---- indicator.ini：出处项目（cryptoTrader）那份配置在本仓库的快照，[html_alert] 一段放监测阈值 ----
-# 2026-09-24 之前运行期完全不读它（阈值全在代码里）；现在 `api/notify.py --html-alert` 要读那五个键，
+# ---- indicator.ini：出处项目（cryptoTrader）那份配置在本仓库的快照，[html_alert_top]/[html_alert_bottom] 放监测阈值 ----
+# 2026-09-24 之前运行期完全不读它（阈值全在代码里）；现在 `api/notify.py --html-alert` 要读那两段各自的键，
 # 所以这里开一条**只读、单独一张表**的通路。刻意不并进 `CONFIG_ENV`：那份文件里同样有 `[TG]`／`[dingding]`
 # 两段凭据，段名键名都和 config.ini 撞，混进同一张映射表就等于让快照反过来覆盖 config.ini 的生效值。
-# 环境覆盖由各调用方自己按 `HTML_ALERT_*` 这类前缀查（环境变量 > ini > 代码默认，与全站同一顺序）。
+# 环境覆盖由各调用方自己按 `HTML_ALERT_TOP_*` / `HTML_ALERT_BOTTOM_*` 这类前缀查（环境变量 > ini > 代码默认，与全站同一顺序）。
 INDICATOR = os.environ.get("INDICATOR_INI") or os.path.join(ROOT, "indicator.ini")
 _IND_CFG = None
 
@@ -119,7 +119,7 @@ def indicator_get(sect, opt, default=""):
         try:
             cfg.read(INDICATOR, encoding="utf-8")
         except (configparser.Error, OSError, UnicodeDecodeError) as e:
-            log.warning("[config] indicator.ini 读不了（%s），[html_alert] 一律退回代码默认值：%s",
+            log.warning("[config] indicator.ini 读不了（%s），[html_alert_top]/[html_alert_bottom] 一律退回代码默认值：%s",
                         short_err(e), INDICATOR)
             cfg = configparser.ConfigParser()
         _IND_CFG = cfg
