@@ -134,7 +134,7 @@
   </section>
 
   <section id="sys" class="sys">
-    <div class="shead"><h2>系统资源</h2><span class="tagline">上三格 = 取数服务自述（<span class="num">/api/health</span> 实时探测）· 下四条 = serv00 主机配额，<b>限额是手工抄录的快照</b>，只有「内存」那一格的用量现取 <span class="num">/api/health</span></span><div class="rule"></div></div>
+    <div class="shead"><h2>系统资源</h2><span class="tagline">上三格 = 取数服务自述（<span class="num">/api/health</span> 实时探测）· 下四条 = serv00 主机配额，<b>限额与用量都是手工抄录的快照</b>，四条同一个口径，都不随部署自动更新</span><div class="rule"></div></div>
     <div class="trio">
       <div class="panel">
         <h3>进程与服务<span class="cadb" id="s-badge" style="margin-top:0;margin-left:auto">○ 探测中</span></h3>
@@ -166,10 +166,10 @@
       </div>
     </div>
     <div class="panel" style="margin-top:14px">
-      <h3>主机配额 · serv00<span class="cadb" id="host-badge" style="margin-top:0;margin-left:auto">○ 写死快照</span></h3>
+      <h3>主机配额 · serv00<span class="cadb" style="margin-top:0;margin-left:auto">○ 写死快照</span></h3>
       <div class="ph" id="host-ph">—</div>
       <div id="host-rows"></div>
-      <div class="note">这四条的<b>限额</b>取数服务自己算不出来（<span class="num">/api/health</span> 只有进程内信息，整机配额要调面板子进程），所以按 <span class="num">devil user info</span> 的输出手工写死在脚本的 <span class="num">HOST</span> 里，<b>不随部署自动更新</b>；换主机或面板改限额时手改那一处即可。唯一的例外是「内存」那一格的<b>用量</b>：现取自 <span class="num">/api/health</span> 的 <span class="num">rss_mb</span>，那是<b>本服务这一个进程</b>的峰值 RSS，不是账户总占用（512 MB 是账户级上限），也不是整机内存；服务没上报时这一格显示「—」而不是补一个数。条形宽度、配色、超 100% 时「画到满格但数字照抄」全部由 <span class="num">pct</span> 推导，页面里没有手填的百分比。</div>
+      <div class="note">这四条的<b>限额与用量</b>取数服务自己都算不出来（<span class="num">/api/health</span> 只有进程内信息，整机配额与账户总占用要调面板子进程），所以按 <span class="num">devil user info</span> 与面板「资源」页的输出手工写死在脚本的 <span class="num">HOST</span> 里，<b>不随部署自动更新</b>；换主机、面板改限额、或你在面板上看到用量变了，就手改那几行。「内存」那一格的 <span class="num">1500M</span> 是 2026-09-24 抄的<b>账户总用量</b>（<span class="num">512 MB</span> 是账户级上限，所以这一格早就超限）。它<b>不接</b> <span class="num">/api/health</span> 的 <span class="num">rss_mb</span>：那是<b>本服务这一个进程</b>的峰值 RSS，跟账户总占用不是一个口径，两个数各自看各自的（要读进程那份就 <span class="num">curl /api/health</span>）。条形宽度、配色、超 100% 时「画到满格但数字照抄」全部由 <span class="num">pct</span> 从 <span class="num">used/limit</span> 推导，页面里没有手填的百分比。</div>
     </div>
   </section>
 
@@ -186,7 +186,7 @@
 <div class="toast" id="toast" hidden role="status" aria-live="polite"><span id="toast-msg"></span><button class="rf" id="toast-x" type="button" title="关闭">✕</button></div>
 
 <footer>
-  <p>公共样式与脚本：<span class="num">staic/common.css · staic/common.js</span>（三子页面与本页共享）。模块代码与约定见 <span class="num">api/</span> 与 <span class="num">api/Liquidity/Qoder.md</span>。</p>
+  <p>Copyright © myaibtc.serv00.net TG: @yunxiao2017</p>
 </footer>
 
 <script src="staic/common.js"></script>
@@ -195,15 +195,15 @@
 /* 持仓报告不设访问凭据（2026-09-22 用户定）：服务端只按 [report] daily_limit / us_daily_limit 分 kind 限每日次数 */
 const REPORTS = { crypto: '/api/allocation/report?kind=crypto',
                   us: '/api/allocation/report?kind=us' };
-/* ---- 系统资源：/api/health 每探测周期现取；下面这张表除 RAM 用量外都是手工抄的快照 ----
+/* ---- 系统资源：上面三格 /api/health 每探测周期现取；下面这张表四条全是手工抄的快照 ----
        百分比一律由 used/limit 现算，不再手填 —— 手填过一次就会和数字各说各话。 ---- */
 const HOST = {
-  at: '2026-09-23 06:40', src: 'devil user info',
+  at: '2026-09-23 06:40 · 内存 2026-09-24', src: 'devil user info · 面板资源页',
   rows: [
     { k: '磁盘配额 Disk quota', used: '557.2M', limit: '3.0G' },
     { k: '进程数 Processes', used: '7', limit: '20' },
-    { k: '内存 RAM memory', limit: '512.0M', live: 'rss_mb',
-      note: '上限 512 MB = serv00 官方配额；这一格的用量只算本服务这一个进程的峰值 RSS（/api/health 的 rss_mb，实时），不是账户总额也不是整机内存' },
+    { k: '内存 RAM memory', used: '1500M', limit: '512.0M',
+      note: '账户总用量 / 账户级上限，都是抄的；不是本服务进程的 rss_mb' },
     { k: 'CPU', used: '0.0', limit: '100' },
   ],
 };
@@ -217,7 +217,6 @@ const dt = iso => { const t = Date.parse(iso); return Number.isFinite(t) ? new D
 const dur = s => { s = Math.max(0, Math.round(s)); const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
   return d ? `${d} 天 ${h} 小时` : h ? `${h} 小时 ${m} 分` : `${m} 分 ${s % 60} 秒`; };
 function sysPaint(svc, gotAt) {
-  hostPaint(svc);          // RAM 那行的用量来自 /api/health，跟着探测周期一起刷
   const base = e => ('base' in e.dataset ? e.dataset.base : (e.dataset.base = e.className));
   const keys = ['s-mode', 's-pid', 's-boot', 's-up', 's-now', 's-skew', 's-rt', 's-mt', 's-stale',
                 's-cfg', 's-proxy', 's-fix', 's-log', 's-mods', 's-routes'];
@@ -260,33 +259,25 @@ function sysPaint(svc, gotAt) {
     return `<div class="kv"><span>${m}</span><b class="num" title="/api/${m}/{${r.join(',')}}">${r.length} 个 · ${r.join(' ')}</b></div>`;
   }).join('');
 }
-function hostPaint(svc) {
-  const b = $('host-badge');
-  const live = !!(svc && svc.rss_mb != null);
-  if (b) { b.textContent = live ? '● 内存实时 · 余为快照' : '○ 写死快照'; b.className = 'cadb' + (live ? ' live' : ''); }
+/* 主机配额四条：用量与限额都是上面 HOST 里抄的快照，这里只负责按 used/limit 现算百分比 */
+function hostPaint() {
   $('host-ph').innerHTML = `来源 <span class="num">${HOST.src}</span> · 抄录于 <span class="num">${HOST.at}</span> · ` +
-    `共 <span class="num">${HOST.rows.length}</span> 项 · 百分比按 used/limit 现算 · 带 <span class="num">实时</span> 的行现取自 <span class="num">/api/health</span>`;
+    `共 <span class="num">${HOST.rows.length}</span> 项 · 百分比按 used/limit 现算 · 超 100% 时条形封顶、数字照抄`;
   $('host-rows').innerHTML = HOST.rows.map(r => {
-    let used = r.used, tag = '';
-    if (r.live) {
-      const v = svc && svc[r.live];
-      used = v == null ? null : v + 'M';
-      if (used != null) tag = ' <span class="num" style="color:var(--green)">实时</span>';
-    }
-    const u = toMB(used), l = toMB(r.limit);
+    const u = toMB(r.used), l = toMB(r.limit);
     const pct = Number.isFinite(u) && Number.isFinite(l) && l > 0 ? u / l * 100 : NaN;
     const c = pct >= 90 ? 'var(--red)' : pct >= 70 ? 'var(--amber)' : 'var(--green)';
     const w = Math.max(0, Math.min(pct || 0, 100)).toFixed(2);
-    const tip = (r.note ? r.note + ' · ' : '') + `上限 ${r.limit}` + (used == null ? ' · 用量未取到' : ` · 用量 ${used}`) +
+    const tip = (r.note ? r.note + ' · ' : '') + `用量 ${r.used} · 上限 ${r.limit}` +
                 (pct > 100 ? ' · 已超上限，条形封顶显示' : '');
-    const val = used == null ? '—（服务没上报，页面不猜）'
-      : (Number.isFinite(pct) ? pct.toFixed(2) + '%' : '—') + `（${used} / ${r.limit}）` + (pct > 100 ? ' ← 超上限，条形封顶、数字照抄' : '');
-    return `<div class="hb${Number.isFinite(pct) && pct < 90 ? ' ok' : ''}"><i>${r.k}${tag}</i>` +
+    const val = (Number.isFinite(pct) ? pct.toFixed(2) + '%' : '—') + `（${r.used} / ${r.limit}）` +
+                (pct > 100 ? ' ← 超上限，条形封顶、数字照抄' : '');
+    return `<div class="hb${Number.isFinite(pct) && pct < 90 ? ' ok' : ''}"><i>${r.k}</i>` +
       `<span class="track"><b style="width:${Number.isFinite(pct) ? w : 0}%;background:${c}"></b></span>` +
       `<u title="${tip.replace(/"/g, '&quot;')}">${val}</u></div>`;
   }).join('');
 }
-hostPaint(null);
+hostPaint();   // 四条全是快照，页面开一次画一次就够了，不用跟着探测周期刷
 
 /* ---- BTC 数据监控：与流动性页共用 /api/liquidity/btc 的服务端缓存（TTL 45s）。
         均线位置沿用流动性页同一套公开口径：现价同时高于 MA120 与 MA200 = 站上双均线，
@@ -429,6 +420,10 @@ function toast(msg, o) {
 $('toast-x').addEventListener('click', () => { clearTimeout(toastTimer); $('toast').hidden = true; });
 $('rpt-crypto').addEventListener('click', () => getReport('crypto', $('rpt-crypto')));
 $('rpt-us').addEventListener('click', () => getReport('us', $('rpt-us')));
+/* ---- 主题切换联动 ---- */
+/* riskColor 现在经 T('--x') 现取：切主题后迷你图与「均线位置」要按当前色板重画。
+   BTCJ 还没取到就不动，交给 syncBtc 自己渲染，免得抢在首屏前显示成「取数失败」。 */
+addEventListener('themechange', () => { if (BTCJ) btcPaint(); });
 </script>
 </body>
 </html>

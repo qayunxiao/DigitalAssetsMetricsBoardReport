@@ -20,7 +20,7 @@
   .strip .tier{position:absolute;top:36px;height:48px;border-left:1px dashed var(--line2)}
   .strip .tier b{position:absolute;top:-22px;left:-14px;font-size:10px;color:var(--tx3);font-weight:400;white-space:nowrap}
   .dot{position:absolute;top:44px;transform:translateX(-50%);text-align:center}
-  .dot i{display:block;width:12px;height:12px;border-radius:50%;border:2px solid #0e0f10;margin:13px auto 3px}
+  .dot i{display:block;width:12px;height:12px;border-radius:50%;border:2px solid var(--bg);margin:13px auto 3px}
   .dot em{font-style:normal;display:block;font-family:var(--mono);font-size:11px}
   .dot span{display:block;font-size:10.5px;color:var(--tx3);white-space:nowrap}
   .dot.below i{margin-top:-3px}
@@ -46,7 +46,7 @@
   /* 一行两个：卡片里有价格行 + 两张图，三列会把图挤到看不清 */
   .agrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px}
   @media(max-width:760px){.agrid{grid-template-columns:1fr}}
-  .ratebar{position:relative;height:10px;border-radius:5px;background:#0b0c0d;border:1px solid var(--line2);margin:7px 0 3px}
+  .ratebar{position:relative;height:10px;border-radius:5px;background:var(--inset);border:1px solid var(--line2);margin:7px 0 3px}
   .ratebar i{position:absolute;top:-3px;width:3px;height:15px;border-radius:2px;background:var(--gold)}
   .ratebar em{position:absolute;top:-20px;transform:translateX(-50%);font-style:normal;font-size:10px;font-family:var(--mono);color:var(--tx2)}
   .rk{display:flex;justify-content:space-between;font-size:10.5px;color:var(--tx3);font-family:var(--mono)}
@@ -175,6 +175,7 @@
 <footer>
   <p>本面板为基于公开数据的量化情绪/估值参考，非个性化投资建议。判级阈值与算法黑纸白字列于「判级规则」区，可逐条复核。</p>
   <p style="margin-top:8px">数据链路：页面 → 本地服务 <span class="num">/api/allocation/*</span>（+ <span class="num">/api/crash/yields</span>）→（代理，见 <span class="num">config.ini</span>）→ Yahoo / FRED / CNBC / ccxt 官方节点。点击「↻ 刷新实时」强制穿透缓存重取；任一序列取数失败在对应卡片标注并剔除出全球温度，绝不以滞后值冒充实时值。</p>
+  <p style="margin-top:8px">Copyright © myaibtc.serv00.net TG: @yunxiao2017</p>
 </footer>
 
 <script src="common.js"></script>

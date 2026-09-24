@@ -39,12 +39,13 @@ DigitalAssetsMetricsBoard/
 ├── main.py                    本机入口：起 127.0.0.1 单一服务
 ├── passenger_wsgi.py          公网入口（serv00/Passenger 用面板指定的解释器 import 它），见第 7 节
 ├── config.ini                 运行配置（代理/端口/日志/页面开关/公网模式/落库），见第 4 节
+├── indicator.ini              出处项目（cryptoTrader）的配置快照 + 凭据副本；**2026-09-24 起它的 `[html_alert]` 段是运行时配置**——页面指标定时播报的阈值与每天时刻都在那里，见 4.1
 ├── local.ini                  可选：同目录、已 gitignore，`api/db.py` 读它优先于 `config.ini`（放口令用），没有这文件也照常跑
 ├── start_app.bat              Windows 一键启动（= python main.py --open）
 ├── start_app.sh               Linux／FreeBSD 启动器（本机模式用这个；优先它自己的 venv 解释器、不沿用 Windows 代理）
 ├── deploy_app.sh              serv00 公网侧部署／重载脚本（判断是否已部署 → 解压或只重载，见 7.2）
 ├── staic/                     前端（目录名就是 "staic"，勿改）
-│   ├── common.css / common.js 五页共享样式、导航、探针、自动刷新工具
+│   ├── common.css / common.js 五页共享样式、导航、探针、自动刷新工具（色板在 `common.css` 顶部那两块：`:root` 深、`html[data-theme=light]` 亮；顶栏「☀ 亮色 / ☾ 深色」按钮切换，状态存 `localStorage['board-theme']`，默认深色）
 │   └── btc.html / Liquidity.html / USStockCrashMonitor.html / GlobalQualityAssetAllocation.html
 ├── api/
 │   ├── core.py                公共层：config 应用、日志、TTL 缓存、串行队列、remote()、dispatch()/wsgi_app()、路由与静态托管
@@ -54,7 +55,7 @@ DigitalAssetsMetricsBoard/
 │   ├── liquidity.py           /api/liquidity/*   ├── crash.py      /api/crash/*
 │   ├── allocation.py          /api/allocation/*（资产配置页的取数全在这一个文件里，没有同名目录）
 │   ├── db.py                  可选落库层（MySQL 旁路 + `/api/db/health`）：建表、写入、状态自检
-│   ├── notify.py              Telegram 推送出口（`QA` / `ALVIN` 两个机器人，令牌读 `config.ini` 的 `[TG]`，见第 4 节；**没有任何 HTTP 接口调它**，BTC 极值播报走 `--btc` 命令行）
+│   ├── notify.py              Telegram 推送出口（`QA` / `ALVIN` 两个机器人，令牌读 `config.ini` 的 `[TG]`，见第 4 节；**没有任何 HTTP 接口调它**，BTC 极值播报走 `--btc`、三张卡定时播报走 `--html-alert` 命令行，阈值见 4.1）
 │   ├── Liquidity/             流动性模块详档（README.md 接口契约/阈值表、Qoder.md 审计纪律）与 _legacy/ 归档
 │   └── USStockCrashMonitor/   原 Streamlit 版归档（_legacy/，README.md 为旧版说明）
 ├── utils/                     cryptoTrader `utils/` 的仓库内只读副本（含 `operationMysql.py`），对照用、不参与 import，见 7.3
@@ -63,6 +64,7 @@ DigitalAssetsMetricsBoard/
 ├── data/risk_history.csv      崩盘页每日评分累积（同日覆盖）
 ├── data/report_quota.json     两个持仓报告的当日点击计数（crypto/us 各记各的，跨天自动作废，限次见 [report]）
 ├── data/notify_state.json     TG 播报的去重与每日限额记录（`api/notify.py`，见第 4 节；只留最近一条，删掉等于「今天没发过」）
+├── data/notify_html_state.json 定时播报（`--html-alert`）的「今天评过了」记录（见 4.1；删掉等于「今天还没评」，当天会再打一次上游）
 ├── data/daycache/             磁盘日缓存：每个缓存键一份「今天取到的原始结果」（见 7.4，可整目录删除）
 ├── logs/board_server.log      午夜轮转，保留 14 天
 └── Qoder.md                   给 agent 的项目约定（审计提示词、硬性纪律、边界）
@@ -90,6 +92,7 @@ DigitalAssetsMetricsBoard/
 ## 4. 配置（config.ini 是唯一事实源）
 
 优先级：**同名环境变量 > `config.ini` > 代码默认**。临时改一次不必动文件：`set HTTPS_PROXY=http://127.0.0.1:7890 && python main.py`。
+本节这个「唯一」有一处例外：`--html-alert` 那三项监测的阈值与每天时刻住在 `indicator.ini` 的 `[html_alert]`（优先级同一套），见 4.1——2026-09-24 用户明示要「改配置不改代码」；其余判级数值仍在代码里。
 
 | 节 | 键 | 环境变量 | 当前值 / 说明 |
 |---|---|---|---|
@@ -113,10 +116,13 @@ DigitalAssetsMetricsBoard/
 python api/notify.py                                   # 只自检：两个机器人各问一次 getMe（只读，问 bot 自己是谁），不发任何消息
 python api/notify.py --text "测试正文"                  # 同上，外加把这条正文打印出来预览，仍不发
 python api/notify.py --send --bot QA --text "测试正文"   # 真发一条到 QA 那个群（--send 必须搭配 --bot，否则拒绝并退码 2）
-python api/notify.py --status                           # 纯本地：上一单发给谁/哪天/第几条 + 今日额度，不打网络也不打库
+python api/notify.py --status                           # 纯本地：两条播报各自的当天记录 + 今日额度 + `[html_alert]` 生效阈值，不打网络也不打库
 python api/notify.py --btc                              # BTC 极值播报：取数 → 挑卡 → 组正文 → 报会不会被闸门挡；**不发**
 python api/notify.py --btc --send                       # 真发（机器人取 `--bot`，没给就用 `[notify] tg_bot`）
 python api/notify.py --btc --send --force               # 连过两道闸门（同一业务日已发过时手工补发）
+python api/notify.py --html-alert                       # 页面指标定时播报：取数 → 三项判定 → 组正文，**顺带报「真到 cron 那一刻会不会被闸门挡」**；不发、不记账
+python api/notify.py --html-alert --send                # 真发一条（cron 挂这条；时刻与阈值见 4.1）
+python api/notify.py --html-alert --send --force        # 跳过「不早于 ALERT_AT」和「一个日历日只评一次」（手工补发用）
 ```
 
 **`--btc` 的触发口径**（2026-09-24 定，策略常量在 `api/notify.py` 里，运行参数在 `[notify]`）：
@@ -131,9 +137,37 @@ python api/notify.py --btc --send --force               # 连过两道闸门（�
 | 闸门二 | `[notify] daily_limit`（默认 1）按日历日计数 |
 | 记账时机 | 只在真发成功之后写 `data/notify_state.json`；失败不计数（一次网络抖动不该烧掉当天额度）。预览跑一百遍也不扣 |
 
-发信走 `core.PROXY`（本机），公网机器上 `[proxy]` 被 `win_only` 跳过所以直连。正文不设 `parse_mode`（Markdown/HTML 里一个裸 `_` 或 `<` 就整条 400），超 4096 字按 Telegram 上限截断。**没有定时器**：要每天自动播，自己挂 cron／计划任务跑 `python api/notify.py --btc --send` —— 服务代码里没有一行会自己发（见第 9 节）。`--btc` 走的就是 `btc.summary()`，所以顺带把 13 项读数 UPSERT 进库（7.3），与页面刷新同一语义；`--status` 才是完全不碰外部的自检。
+发信走 `core.PROXY`（本机），公网机器上 `[proxy]` 被 `win_only` 跳过所以直连。正文不设 `parse_mode`（Markdown/HTML 里一个裸 `_` 或 `<` 就整条 400），超 4096 字按 Telegram 上限截断。**没有定时器**：要每天自动播，自己挂 cron／计划任务跑 `python api/notify.py --btc --send`（盯那三张卡的定时版是 `--html-alert --send`，见 4.1）—— 服务代码里没有一行会自己发（见第 9 节）。`--btc` 走的就是 `btc.summary()`，所以顺带把 13 项读数 UPSERT 进库（7.3），与页面刷新同一语义；`--status` 才是完全不碰外部的自检。
 
 **凭据的去处**：这条规矩在 2026-09-24 被用户**明示改口**过，现在的边界是「**该段口令可以入库，但任何接口/日志/聊天都不许回显**」。原先写的是「运行参数可以入库，口令不行」，因为 `config.ini` 是 git 跟踪文件、`deploy_app.sh` 又按 `git ls-files` 打上传包，写进去等于把口令发到公开仓库和公网机器上——这个后果今天**已经成立**：`[dingding]` `[TG]` 两段明文此刻在公开的 `origin/main` 里，也上了 serv00 那台机器。用户明知这一点仍要求这么做（原话：「确认要把明文密钥写进 config.ini 并提交到公开仓库，之后我BTC 相关指标需要发TG 需要使用到这样的功能」），所以要轮换/收回是他的动作，**后来的 agent 别默默把它改回去、也别不吭声地再往里加新凭据**。`[mysql] PASSWD` 那段的**书面**规矩仍是「优先 `local.ini` 或 `set MYSQL_PASSWD=…`，提交前先 `PASSWD =` 留空」；2026-09-23 曾把整段挪进 `local.ini`，同日按用户要求挪回 `config.ini` 并保留两级覆盖。**但 2026-09-24 核对：这段口令已经在公开的 `origin/main` 里了**（`git show origin/main:config.ini` 能查到那行 `PASSWD`，来自 `63b9101`），所以上一句「提交前清空」对历史已经无效——要么清空后重新提交、要么视同已泄露去轮换，这是他的动作，我们只提示不代执行。`COINGLASS_KEY` 从一开始就是纯环境变量（故意不进 `CONFIG_ENV`，也不写任何 ini），这条没变。另核对一笔：`indicator.ini`（出处项目的凭据快照）**并非**「已 gitignore 所以不在仓库里」——它早在 `63b9101` 就被跟踪，gitignore 只挡未跟踪文件，那批 CoinGlass/CryptoQuant Key、钉钉与 TG 令牌、TradingView 口令一直在远端历史里；要挡住得先 `git rm --cached indicator.ini` 再提交，且必须轮换。
+
+### 4.1 页面指标定时播报（`--html-alert`，阈值住在 `indicator.ini` 的 `[html_alert]`）
+
+2026-09-24 用户要的功能：**每天定点盯看板那三张卡，命中就发 TG**，并且「这几档要能改配置不改代码」。
+这是全站**唯一**一处把判级数值放进 ini 的地方（其余口径都在代码常量里，理由见 `Qoder.md` 第 2 节），
+所以引用下面这几个数之前**先重读那份文件**——他会手改。
+
+| 键（env 同名加前缀 `HTML_ALERT_`） | 现值 | 含义 |
+|---|---|---|
+| `ALERT_AT` | `08:10` | 每天的时刻，`hh:mm`（24 小时制，按**跑脚本那台机器的本地时区**）。语义是「不早于此时刻」：到点后第一次真评，08:10 那分钟机器没起来则 08:11 之后补。留空 = 不设时刻 |
+| `ALERT_HITS` | `3` | 要求同时命中几项。`1`=任一、`2`=任意两项、`3`=三项全中；留空 = 有几项算几项全中（停用一项就按两项算） |
+| `AHR999_MAX` | `0.57` | 项① AHR999 定投指数：卡片头条值 `<=` 此数即满足。留空或写坏 = 停用本项 |
+| `FEAR_GREED_MIN` | `70` | 项② 恐慌贪婪指数：卡片头条值 `>=` 此数即满足。留空或写坏 = 停用本项 |
+| `TWM_CLOSE_ABOVE_SUPPORT` | `1` | 项③ 2年MA乘数通道：**日线收盘** > 同一根上的支撑 730MA 即满足。这一项没有数值阈值，`1`=启用、`0` 或留空=停用 |
+
+- **数从哪来**：`btc.summary()`，也就是 `staic/btc.html` 那一份，播报层**不重算任何指标**，只比大小。
+  项③刻意不用首页那个多所现价中位数——收盘取通道卡 `bands` 最后一根的 `px`（Yahoo `BTC-USD` 日线），
+  与同一根的 `lo` 比，两边日期必然一致；末行缺收盘就退到最近一根齐的，整列都不齐就是缺数据，**不外推**。
+- **缺数怎么办**：取不到数的项记为「缺口」，既不算满足**也照样占 `ALERT_HITS` 的额**（写着 3 就要三项都成立）。
+  代价说清楚：某项长期挂掉会让这条播报长期沉默——遇到就修源，或把 `ALERT_HITS` 调小／停用那一项，别改判定代码。
+  「停用的项」（值为空/写坏）不占额，正文里两类都会列出来（`✓`/`✗`/`—`/`·`）。
+- **两道闸门都走在取数前面**：① 不早于 `ALERT_AT`；② **一个日历日只评一次**——触发发了要记，没触发也要记「今天评过了」，
+  所以 cron 每分钟拉起一次，一天也只打一次上游。记录在 `data/notify_html_state.json`（已 gitignore，与 `--btc` 那份各记各的）。
+  **预览（不带 `--send`）从不记账**，也照样能看数：看一眼配置不该把当天该播的提示哑掉。真发失败同样不记，下一分钟的 cron 自己再试。
+- **收件人**：`[notify] tg_bot`（`--bot` 覆盖）。**这条路径不消耗 `[notify] daily_limit`**（那条只管 `--btc`），闸门②自己封顶。
+- **怎么挂**：cron 每分钟一次即可（脚本自己判时刻），`* * * * * cd ~/www && /usr/local/bin/python3 api/notify.py --html-alert --send >> logs/notify_cron.log 2>&1`。
+  时刻按服务器本地时区解释——**别猜偏移**，先在服务器上 `date`、或看主页「浏览器 − 服务端」那一格对一下再定 `ALERT_AT`。
+- 与 `--btc` 一样，这条链也走 `btc.summary()`，所以顺带把 13 项读数 UPSERT 进库（见 7.3）。
 
 ## 5. 接口契约（/api/*）
 
@@ -258,9 +292,10 @@ stdout 也只在按需展开时显示；约束只有 `[report] daily_limit`（�
    import 进内存的，不重启就一直用旧路由——「首页按钮出来了、点下去却回 `未知接口 /api/allocation/report`」就是这么来的。
    用 `curl -s .../api/health` 一眼分辨：`stale=true` = 盘上的 .py 比内存里的新（该 restart.txt 了）；
    `routes` 里没有 `report` = 内存里跑的还是把报告摘掉的那版；`pid` 在重载后会变。
-   `rss_mb` = **本进程**峰值内存（MB；Unix 走 `resource.ru_maxrss`，其单位 Linux 是 KB、FreeBSD/macOS 是字节，代码分别换算；
+   `rss_mb` = **本进程**峰值内存（MB。Unix 走 `resource.ru_maxrss`：**Linux 与 FreeBSD 都是 KB，只有 macOS 给字节**（FreeBSD `getrusage(2)` 明写 "in kilobytes"）；
    Windows 没有 `resource`，改问 `K32GetProcessMemoryInfo`/`psapi` 的 `PeakWorkingSetSize`，两条路都取不到才回 `null`）。
-   主页「主机配额 · serv00」的内存那一格拿它现算，其余三格的用量仍是手工抄的面板快照——那一格**只说这一个进程**，不等于账户总额（serv00 的 512 MB 是账户级上限），更不是整机内存。
+   2026-09-24 之前这里把 FreeBSD 也按字节除，`/api/health` 报的是 `2.1`，实际是 `ru_maxrss ≈ 2,202,009 KB ≈ 2.1G`——差了 1024 倍。
+   这个值**只待在 `/api/health` 里**：主页「主机配额 · serv00」的内存那一格从前拿它现算，但它是**单进程峰值**，和那一格想说的**账户总占用**（ serv00 账户级上限 512 MB）不是一个口径，2026-09-24 起那一格改成手工抄的 `1500M / 512.0M`，四条同一个口径，页面只按 `used/limit` 现算百分比。
 6. 冒烟五条（都**不会**执行报表脚本）：
    `curl -s https://myaibtc.serv00.net/api/health` 里应有 `"mode": "public"`，并且 `routes.allocation` 含 `report`、`stale` 为 `false`；
    `curl -o /dev/null -w '%{http_code}\n' https://myaibtc.serv00.net/config.ini` 应 `404`；
@@ -361,7 +396,7 @@ python api/db.py --help              # 完整说明
 - 本机版服务只绑定 `127.0.0.1`；`/api/*` 仅接受白名单参数，不做任意 URL 转发。公网版（`PUBLIC=1`）由 Passenger 对外，本服务自身仍不开端口，额外收敛只有第 7.2 节那一条静态扩展名白名单；除此之外**没有鉴权、没有限流**，公开的是取数与判级逻辑；静态白名单不收 `.ini`，所以浏览器拿不到配置文件，但**仓库本身是公开的**，`config.ini` 里那两段明文凭据的来龙去脉与后果见第 4 节。
 - 两个持仓报告（`report?kind=crypto` / `?kind=us`）是本服务唯一执行外部程序的路由——共用一把串行锁，同一时刻只有一个报表进程：路径与解释器全部写死在代码里、按 OS 二选一，只能由 `config.ini`／环境变量覆盖，`kind` 只接受 `crypto|us`，不接收任何来自页面的命令、参数或路径。副作用与暴露面（2026-09-22 用户知情后选定，2026-09-23 同样口径接到美股）：两个脚本无参数运行都会把报表推送到 Telegram，点一次发一条；公网版与本机版一样不带凭据，能打开首页的人都能点，唯一闸门是各自的每日次数上限（加密 `[report] daily_limit` 默认 3、美股 `us_daily_limit` 默认 2，超限 429）与上面那把串行锁。计数落盘在 `data/report_quota.json`，形状是 `{date, kinds: {crypto: n, us: m}}`。
 - 服务本身不写鉴权、不把凭据写进任何它生成的文件；代理地址只出现在 `config.ini` 或环境变量，日志与响应体里也不写凭据。BTC 指标页各项的上游**全部公开无密钥**；唯一可能的密钥是 AHR999 的备用路径 `COINGLASS_KEY`，它**只能来自环境变量**——`CONFIG_ENV` 里没有这一项，所以既不进 `config.ini`、也不进上传包，没设就完全不试那条路。`/api/btc/one?k=` 的 `k` 走 `_KEYS` 白名单，未知键 400，不接受任何 URL、路径或参数透传。
-- **Telegram 出站（`api/notify.py`，2026-09-24）不是路由**：没有任何 HTTP 接口调它，页面上按不到，能真发消息的那条命令必须由人在命令行上敲出 `--send` **并且**带 `--bot`，其余路径最多发只读的 `getMe`。它也不改变前面那条「唯一执行外部程序的路由」的结论——那两个持仓报告按钮仍然是本服务里唯一会跑外部脚本的地方（`notify.py` 只发一次 HTTPS 请求，不 spawn 进程）。**BTC 指标的自动推送只有命令行这一条路**（口径见第 4 节：`BTC_WATCH` 四张卡的 `tone` 命中 `green`/`red` 才发，同一 `(机器人, 业务日)` 一条，`[notify] daily_limit` 封顶）；要「每天自动播」得由你在自己机器上挂 cron／计划任务跑 `--btc --send`，**服务代码里没有一行会自己发信**，也别给它加路由——理由就是那三次误发：一条会自己发信的链路必须先有「一天最多几条、发什么、发给谁」的明确约定，这条约定 2026-09-24 已经定了，改它要连着改本节。
+- **Telegram 出站（`api/notify.py`，2026-09-24）不是路由**：没有任何 HTTP 接口调它，页面上按不到，能真发消息的三条命令（`--text`、`--btc`、`--html-alert`）都必须由人在命令行上敲出 `--send` 才发，其余路径最多发只读的 `getMe`（`--text` 那条还额外要求带 `--bot`，不带就拒发，免得一条消息同时落到两个群）。它也不改变前面那条「唯一执行外部程序的路由」的结论——那两个持仓报告按钮仍然是本服务里唯一会跑外部脚本的地方（`notify.py` 只发一次 HTTPS 请求，不 spawn 进程）。**BTC 指标的自动推送只有命令行这一条路**：`--btc` 的口径见第 4 节（`BTC_WATCH` 四张卡的 `tone` 命中 `green`/`red` 才发，同一 `(机器人, 业务日)` 一条，`[notify] daily_limit` 封顶），`--html-alert` 的口径见 4.1（三项监测、阈值在 `indicator.ini` 的 `[html_alert]`、一个日历日只评一次、不吃 `daily_limit`）；要「每天自动播」得由你在自己机器上挂 cron／计划任务跑对应那条命令，**服务代码里没有一行会自己发信**，也别给它加路由——理由就是那三次误发：一条会自己发信的链路必须先有「一天最多几条、发什么、发给谁」的明确约定，这条约定 2026-09-24 已经定了，改它要连着改本节。
 - 落库层（7.3）的三条边界：① 它是**旁路**，任何失败只记日志，绝不把异常冒到页面路径上；② `/api/db/health` 连主机名、账号、口令都不回（公网版也挂着它），日志里口令只以「来源是哪一层」出现；③ 持仓报告的 stdout **一个字符都不进库**，库里只存元数据（谁、何时、成没成、多长、报错摘要）。`[mysql] PASSWD` 的解析顺序是环境变量 > `local.ini` > `config.ini`，写进 `config.ini` 的那一行提交前应清空——**2026-09-24 核对：那行口令已经在公开的 `origin/main` 上了**，所以这条只对以后的提交有效，已经泄露的那把要么轮换要么清历史，由用户定。
 - 不 `git add/commit/push`（未经明示指令）；不使用 Qoder Sites `prepare_site`/`publish_site`。公网托管只走第 7.2 节的 serv00/Passenger 路径（2026-09-22 用户明示授权；此前本项目的部署约定是「只在本机」，此次变更按修订记录公开追加而非静默改写）。
 - 数据纪律：绝不把滞后值标成实时；缺测值剔除并入「检索缺口」，不估值；纠错公开追加修订记录，不静默改写。

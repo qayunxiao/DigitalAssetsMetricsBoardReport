@@ -33,7 +33,7 @@
   /* ---- 风险等级常量（展示映射；阈值判定属各页规则） ---- */
   const RISK = { hi: ['r-hi', '🔴 高危'], md: ['r-md', '🟡 中性'], lo: ['r-lo', '🟢 安全'] };
   const RM = { hi: '高危', md: '中性', lo: '安全' };
-  const riskColor = r => r === 'hi' ? '#f2555a' : r === 'md' ? '#e8a33d' : '#4ade80';
+  const riskColor = r => r === 'hi' ? T('--red') : r === 'md' ? T('--amber') : T('--green');
 
   /* ---- 取数：所有接口经本地服务同源中转（浏览器直取官方源必被 CORS 拦） ---- */
   async function jget(u, t = 25000) {
@@ -73,7 +73,7 @@
        lines=[{rows,color,label}] —— 多条线共用一套轴；`v` 非有限值处断线（不连过去、不填 0）。
        log=true —— 对数纵轴，网格线画在十倍处（币价跨 5 个数量级，线性轴会把早期压成一条贴底的直线）。
          这时轴范围一律从数据自己推（上下各留 8% 的对数余量），`dom` 不参与 —— 分位截断是线性轴那套的读法。 */
-  function lineChart(el, rows, { color = '#d4af37', w = 680, h = 200, pad = 34, fmt = md, area = true, aria = '', dom = null, lines = null, log = false } = {}) {
+  function lineChart(el, rows, { color = T('--gold'), w = 680, h = 200, pad = 34, fmt = md, area = true, aria = '', dom = null, lines = null, log = false } = {}) {
     if (!el) return;
     const ss = (lines && lines.length) ? lines : [{ rows, color }];
     const all = [];

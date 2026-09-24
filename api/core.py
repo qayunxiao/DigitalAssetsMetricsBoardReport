@@ -93,6 +93,44 @@ def apply_config():
 
 HAS_CONFIG = apply_config()
 
+# ---- indicator.ini：出处项目（cryptoTrader）那份配置在本仓库的快照，[html_alert] 一段放监测阈值 ----
+# 2026-09-24 之前运行期完全不读它（阈值全在代码里）；现在 `api/notify.py --html-alert` 要读那五个键，
+# 所以这里开一条**只读、单独一张表**的通路。刻意不并进 `CONFIG_ENV`：那份文件里同样有 `[TG]`／`[dingding]`
+# 两段凭据，段名键名都和 config.ini 撞，混进同一张映射表就等于让快照反过来覆盖 config.ini 的生效值。
+# 环境覆盖由各调用方自己按 `HTML_ALERT_*` 这类前缀查（环境变量 > ini > 代码默认，与全站同一顺序）。
+INDICATOR = os.environ.get("INDICATOR_INI") or os.path.join(ROOT, "indicator.ini")
+_IND_CFG = None
+
+
+def indicator_get(sect, opt, default=""):
+    """取 `indicator.ini` 里某段某键的字符串值。三态要分清：
+
+      * 键存在且有值 → 那个值；
+      * 键存在但**留空** → 返回空串（这是「显式停用本项」的意思，调用方别拿默认值把它顶掉）；
+      * 段／键不存在，或整个文件读不了 → 才回 `default`。
+
+    本进程解析一次就缓存（现在唯一的读者是 cron 一次性脚本 `api/notify.py`，每次现起进程，够新；
+    服务进程里要用热改得先重启）。解析失败**只记一条 warning 不回抛**：这文件用户会手改，
+    少个中括号不该把整条播报链路炸掉，届时所有键都退回代码默认值。`log` 在模块后面才定义，
+    这里是调用时才查名字，顺序无关。"""
+    global _IND_CFG
+    if _IND_CFG is None:
+        cfg = configparser.ConfigParser()
+        try:
+            cfg.read(INDICATOR, encoding="utf-8")
+        except (configparser.Error, OSError, UnicodeDecodeError) as e:
+            log.warning("[config] indicator.ini 读不了（%s），[html_alert] 一律退回代码默认值：%s",
+                        short_err(e), INDICATOR)
+            cfg = configparser.ConfigParser()
+        _IND_CFG = cfg
+    try:
+        if not _IND_CFG.has_option(sect, opt):
+            return default
+        return (_IND_CFG.get(sect, opt, fallback="") or "").strip()      # 空串原样返回 = 显式停用
+    except configparser.Error:
+        return default
+
+
 try:
     PORT = int(os.environ.get("PORT") or 8888)
 except ValueError:
@@ -499,7 +537,7 @@ def _code_stamp():
 
 def _rss_mb():
     """本进程峰值内存（MB）：一个进程的量，不是账户总额，也不是整机 —— 首页那行 RAM 的标签就是这么写的。
-    Unix 走 `resource`（Linux 的 ru_maxrss 单位是 KB，FreeBSD/macOS 是字节）；Windows 没有这个模块，
+    Unix 走 `resource`（ru_maxrss 在 Linux 与 FreeBSD 上都是 KB，只有 macOS 给字节）；Windows 没有这个模块，
     改问 kernel32 的 PeakWorkingSetSize（工作集就是 Windows 侧的 RSS）。取不到一律回 None，让页面显示「—」。"""
     try:
         import resource
@@ -508,7 +546,11 @@ def _rss_mb():
     v = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     if not v or v < 0:
         return None
-    return round(v / 1024.0, 1) if sys.platform.startswith("linux") else round(v / 1024.0 / 1024.0, 1)
+    # 只有 darwin 给字节；freebsd 与 linux 同为 KB（2026-09-24 前把 freebsd 当字节除，
+    # 公网那格把 2.1G 显示成 2.1M）。
+    if sys.platform.startswith("darwin"):
+        return round(v / 1024.0 / 1024.0, 1)
+    return round(v / 1024.0, 1)
 
 
 def _rss_mb_windows():

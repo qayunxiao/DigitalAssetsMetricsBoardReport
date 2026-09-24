@@ -1,26 +1,41 @@
 /* DigitalAssetsMetricsBoard 公共样式 —— 三个子页面与 Index.html 共享。
-   页面特有版式（如 Liquidity 的因果链、SOP 区块）保留在各页 <style> 内。 */
+   页面特有版式（如 Liquidity 的因果链、SOP 区块）保留在各页 <style> 内。
+   两套主题只有下面这两块色板：`:root` 是深色（默认），`html[data-theme=light]` 是亮色
+   （「冷灰蓝底 + 白卡 + 细网格 + 等宽数字」，金色只留给品牌与强调，数据线走青蓝）。
+   开关在 `common.js` 的 initTheme，初值由 <head> 内联片段从 localStorage 读；**两块 token 名单必须一致**，
+   少一个就有一处在另一套主题下渲染成 unset。页面脚本要颜色一律 T('--x') 现取，
+   别在页面或 SVG 属性里写死 hex —— SVG 的 fill/stroke 不认 var()，切换后要靠 themechange 重绘。 */
 :root{
   --bg:#0e0f10; --bg2:#151617; --bg3:#1a1b1c; --panel:#131415;
   --line:#25262a; --line2:#2e3036;
   --tx:#ecece6; --tx2:#9b9b93; --tx3:#6d6d66;
   --gold:#d4af37; --gold2:#f0c43d;
   --red:#f2555a; --amber:#e8a33d; --green:#4ade80;
+  --blue:#6db3d4; --blue2:#4a6f8a;                /* 数据系列的蓝：SOFR / 均线 / TGA 堆叠 */
+  --c-hi:#ef553b; --c-md:#ffa15a; --c-lo:#00cc96; /* 崩盘页仪表盘与基准条的三段色 */
   --mono:"SF Mono",ui-monospace,"Cascadia Mono","JetBrains Mono",Consolas,"Courier New",monospace;
-  /* 主题敏感的表面色（图表网格/刻度/高亮标签、内嵌块、强调边框、顶栏半透明底） */
+  /* 主题敏感的表面色（图表网格/刻度/高亮标签、内嵌块、强调边框、顶栏半透明底、弹层遮罩、卡片投影） */
   --head:rgba(14,15,16,.92); --inset:#0b0c0d;
   --grid:#25262a; --tick:#6d6d66; --lbl:#ecece6;
   --goldline:#3b3320; --goldline2:#3a3320; --alertline:#4a2124; --onred:#160b0c;
+  --ongold:#141410; --scrim:rgba(6,6,7,.74);
+  --goldtint:rgba(212,175,55,.07);
+  --lift:0 1px 2px rgba(0,0,0,.3),0 10px 26px -20px rgba(0,0,0,.75);
 }
 html[data-theme=light]{
-  --bg:#f2f1ec; --bg2:#e9e7e0; --bg3:#dedbd2; --panel:#fbfaf7;
-  --line:#dcd9d0; --line2:#c6c3b8;
-  --tx:#1b1b19; --tx2:#55544e; --tx3:#8b8a82;
-  --gold:#a07d1c; --gold2:#8a6c18;
-  --red:#c93a40; --amber:#b26f14; --green:#1d9a55;
-  --head:rgba(246,245,240,.92); --inset:#eceae2;
-  --grid:#d3d0c6; --tick:#8b8a82; --lbl:#1b1b19;
-  --goldline:#e0d5b0; --goldline2:#e6dcc0; --alertline:#eab8bb; --onred:#fdf2f2;
+  --bg:#eef1f6; --bg2:#e3e8f0; --bg3:#d6ddea; --panel:#ffffff;
+  --line:#dbe2ec; --line2:#b6c3d6;
+  --tx:#0c1420; --tx2:#4a5a70; --tx3:#7e8ea4;
+  --gold:#96690f; --gold2:#7a5410;
+  --red:#cc2f36; --amber:#a8690f; --green:#0f8a4d;
+  --blue:#0e7ea8; --blue2:#41648a;
+  --c-hi:#d9432f; --c-md:#c07b1c; --c-lo:#0d8f68;
+  --head:rgba(255,255,255,.88); --inset:#f2f5fa;
+  --grid:#d5dce8; --tick:#8496ac; --lbl:#0c1420;
+  --goldline:#e6d7b4; --goldline2:#dcc79a; --alertline:#f0c2c5; --onred:#ffffff;
+  --ongold:#fdf6e6; --scrim:rgba(16,24,36,.42);
+  --goldtint:rgba(150,105,15,.09);
+  --lift:0 1px 2px rgba(12,20,32,.06),0 10px 26px -20px rgba(12,20,32,.5);
 }
 *{margin:0;padding:0;box-sizing:border-box}
 body{
@@ -28,6 +43,14 @@ body{
   font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",Roboto,sans-serif;
   line-height:1.6;-webkit-font-smoothing:antialiased;
 }
+/* 亮色才有底纹：冷灰蓝底上两抹很淡的光，右上青、左下暖金；深色保持原来的纯色底 */
+html[data-theme=light] body{
+  background-image:
+    radial-gradient(1100px 480px at 82% -10%, rgba(14,126,168,.13), transparent 62%),
+    radial-gradient(820px 380px at 4% -6%, rgba(150,105,15,.09), transparent 58%);
+  background-attachment:fixed;
+}
+:is(.panel,.card,.vcard,.link,.acard,.icard){box-shadow:var(--lift)}
 .num{font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:-.02em}
 a{color:inherit}
 
@@ -47,7 +70,7 @@ nav.tabs a,nav.tabs button{
   padding:6px 12px;border-radius:6px;cursor:pointer;font-family:inherit;transition:.15s;text-decoration:none
 }
 nav.tabs a:hover,nav.tabs button:hover{color:var(--tx);background:var(--bg3)}
-nav.tabs a.on,nav.tabs button.on{color:var(--gold);border-color:var(--goldline2);background:rgba(212,175,55,.07)}
+nav.tabs a.on,nav.tabs button.on{color:var(--gold);border-color:var(--goldline2);background:var(--goldtint)}
 .asof{font-size:11.5px;color:var(--tx3);white-space:nowrap;margin-left:auto}
 .lbar{display:flex;align-items:center;gap:9px}
 .ls{font-size:11px;font-family:var(--mono);color:var(--tx3);white-space:nowrap}
@@ -119,12 +142,12 @@ section{margin-bottom:34px;scroll-margin-top:76px}
   padding:4px 11px;border-radius:20px;cursor:pointer;font-family:inherit;transition:.15s
 }
 .chipf:hover{color:var(--tx)}
-.chipf.on{background:var(--gold);border-color:var(--gold);color:#141410;font-weight:600}
+.chipf.on{background:var(--gold);border-color:var(--gold);color:var(--ongold);font-weight:600}
 
 /* 结论条 */
 .verdict{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr) minmax(0,1fr);gap:14px;margin-bottom:22px}
 .vcard{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:18px 20px;position:relative;overflow:hidden}
-.vcard.alert{border-color:#4a2124;background:linear-gradient(180deg,rgba(242,85,90,.075),transparent 70%)}
+.vcard.alert{border-color:var(--alertline);background:linear-gradient(180deg,rgba(242,85,90,.075),transparent 70%)}
 .vlabel{font-size:11px;color:var(--tx3);letter-spacing:.13em;text-transform:uppercase;margin-bottom:9px}
 .vbig{font-family:Georgia,serif;font-size:30px;line-height:1.15;letter-spacing:-.01em}
 .vcard.alert .vbig{color:var(--red)}

@@ -53,7 +53,7 @@
   .icard summary,.icard .rf{cursor:pointer}
   .icard .rt{display:flex;gap:6px}
   .icard .rt .rf{font-size:10.5px;padding:2px 7px}   /* 两张并排的小按钮，别把最窄卡片的标题行挤换行 */
-  .zmask{position:fixed;inset:0;z-index:200;background:rgba(6,6,7,.74);backdrop-filter:blur(4px);
+  .zmask{position:fixed;inset:0;z-index:200;background:var(--scrim);backdrop-filter:blur(4px);
          display:flex;align-items:center;justify-content:center;padding:22px}
   .zmask[hidden]{display:none}
   .zbox{background:var(--panel);border:1px solid var(--line2);border-radius:12px;width:min(1024px,100%);
@@ -197,6 +197,7 @@
 
 <footer>
   <p>取数与算法：<span class="num">api/btc.py</span>（注册为 <span class="num">/api/btc/*</span>）· 公共样式与脚本 <span class="num">common.css · common.js</span> · 口径出处 <span class="num">cryptoTrader/api_list/handle_*.py</span>。</p>
+  <p style="margin-top:8px">Copyright © myaibtc.serv00.net TG: @yunxiao2017</p>
 </footer>
 
 <script src="common.js"></script>
@@ -236,7 +237,7 @@ function card(it) {
     ${detOf(it)}
   </div>`;
 }
-function riskOf(tone) { return tone === 'red' ? '#f2555a' : tone === 'green' ? '#4ade80' : '#d4af37'; }
+function riskOf(tone) { return tone === 'red' ? T('--red') : tone === 'green' ? T('--green') : T('--gold'); }
 function isToday(d) { return d === new Date().toISOString().slice(0, 10); }
 
 /* ---- 双击放大：把这张卡自己的序列用公共 lineChart 画大，不另取数、不换口径 ----
@@ -372,9 +373,9 @@ function zPaint() {
   if (bs.length >= 2) {
     /* 通道卡：三条线 + 对数纵轴，画法对齐上游那张图。颜色按语义写死而不是跟 tone 走 ——
        这张卡的判据就是「现价落在支撑与压力之间哪一侧」，绿=支撑、红=压力、黄=现价是读图约定。 */
-    const S = [{ k: 'hi', c: '#f2555a', t: '压力 730MA×5' },
-               { k: 'lo', c: '#4ade80', t: '支撑 730MA' },
-               { k: 'px', c: '#f0c43d', t: '现价 BTC-USD' }]
+    const S = [{ k: 'hi', c: T('--red'), t: '压力 730MA×5' },
+               { k: 'lo', c: T('--green'), t: '支撑 730MA' },
+               { k: 'px', c: T('--gold2'), t: '现价 BTC-USD' }]
       .map(s => ({ k: s.k, color: s.c, label: s.t, vals: bs.map(p => p[s.k]),
                    rows: bs.map(p => ({ d: p.d, v: p[s.k] })) }));
     host.innerHTML = '';                       // 弹层会反复重画，上一次的占位文字/图例要清掉
@@ -537,9 +538,10 @@ addEventListener('keydown', e => { if (e.key === 'Escape') closeZoom(); });
 $('z-chart').addEventListener('pointermove', zHover);
 $('z-chart').addEventListener('pointerdown', zHover);
 $('z-chart').addEventListener('pointerleave', zHoverOff);
-/* 卡片刻度图（spark）按 tone 写死颜色、不读主题变量，不用重画；放大图的 lineChart 读 --grid/--tick/--lbl，
-   取色在生成时固化，所以只有弹层开着时切主题需要重画它 */
-addEventListener('themechange', () => { if (ZKEY) zPaint(); });
+/* ---- 主题切换联动 ---- */
+/* 卡片刻度图（spark）与放大图现在都经 T('--x') 现取，取色在生成时固化，所以两套都要重画；
+   paint() 只用手上的 DATA 重排 DOM，不打上游，放大图由它末尾的 if (ZKEY) zPaint() 顺带画。 */
+addEventListener('themechange', () => paint());
 </script>
 </body>
 </html>
