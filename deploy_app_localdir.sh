@@ -165,25 +165,42 @@ if [ "$MODE" != "reload" ]; then
   touch "$SITE/.deployed"
 fi
 
-# ---------- 3.9 站点根所有 .sh 补执行位：刻意放在上面的 if **外面** ----------
-# 名字不能只列 start_app.sh / deploy_app.sh：alert_cron.sh 在 crontab 里是**直接当命令执行**的
-# （写的就是 /usr/home/.../alert_cron.sh，没有 `sh` 前缀），少 x 位＝每天一次 permission denied，
-# 而且只在 cron 的邮件里露一下，交互终端里你永远看不到——logs/notify_cron.log 会连一行都没有。
-# 放在 if 外面是因为运维脚本经常是单独 scp 上去的（shutdown_app.sh 自己覆盖自己跑不了），
-# 补完位希望 `--reload` 这一条轻命令就能生效，而不是逼人重装一遍站点。
-echo "=== 5.5 站点根所有 .sh 补执行位 ==="
-tot=0; fixed=0; miss=""
+# ---------- 3.9 站点根所有 .sh：先去 CR 再补执行位，刻意放在上面的 if **外面** ----------
+# 为什么去 CR：这台开发机 git 的 core.autocrlf=true，checkout 出来的 .sh 工作副本带 CRLF，
+# scp 到 FreeBSD 后 `#!/bin/sh\r` 会让内核去找一个叫 "sh\r" 的解释器，报出来的却是
+# `No such file or directory`（2026-09-24 在 s11 上 `./deploy_app.sh` 就是这么栽的；
+# 站点根那份走 git checkout、是 LF，所以一直没事）。cron 里同样的坑是**静默**失败。
+# 为什么补执行位：名字不能只列 start_app.sh / deploy_app.sh —— alert_cron.sh 在 crontab 里是
+# **直接当命令执行**的（写的就是 /usr/home/.../alert_cron.sh，没有 `sh` 前缀），少 x 位＝每天一次
+# permission denied，只在 cron 的邮件里露一下，logs/notify_cron.log 连一行都没有。
+# 放在 if 外面：运维脚本经常是单独 scp 上去的，希望 `--reload` 这一条轻命令就能治，而不是重装站点。
+# 用 `tr` + `cmp` 而不是 grep/awk 找 \r：三台机器上 grep 对 CR 的行为不一致（Git Bash 上它把每一行都算命中）。
+echo "=== 5.5 站点根所有 .sh：去 CR + 补执行位 ==="
+tot=0; cr=0; fixed=0; miss=""
 for f in "$SITE"/*.sh; do
   [ -f "$f" ] || continue
   tot=$((tot + 1))
+  if tr -d '\r' < "$f" > "$f.nocr" 2>/dev/null; then
+    if cmp -s "$f" "$f.nocr"; then
+      rm -f "$f.nocr"
+    else
+      mv "$f.nocr" "$f"
+      cr=$((cr + 1))
+      echo "    去 CR $(basename "$f")（Windows 上传带进来的 \\r；LF 那份等价，仓库里就是源）"
+    fi
+  else
+    rm -f "$f.nocr"
+    miss="$miss $(basename "$f")(读不了)"
+    continue
+  fi
   [ -x "$f" ] && continue
   if chmod +x "$f"; then fixed=$((fixed + 1)); echo "    +x $(basename "$f")"; else miss="$miss $(basename "$f")"; fi
 done
-echo "    站点根 .sh 共 $tot 个，本次补位 $fixed 个（其余本来就有 x 位）"
+echo "    站点根 .sh 共 $tot 个：去 CR $cr 个，补 x 位 $fixed 个（其余本来就干净又可执行）"
 if [ "$tot" = 0 ]; then
   echo "    ⚠ $SITE 下没有任何 .sh —— 运维脚本没铺到站点根，crontab 那条会直接找不到文件"
 elif [ -n "$miss" ]; then
-  echo "    ⚠ chmod 失败：$miss（自己看一下权限，属主不是你就没法补）"
+  echo "    ⚠ 这几份没处理成：$miss（多半是属主不是你，自己看一下权限）"
 fi
 for f in alert_cron.sh shutdown_app.sh; do
   [ -f "$SITE/$f" ] || echo "    ⚠ 站点根缺 $f（本地仓库有；上传/装机没铺下来，靠它的那条 cron 或手工流程跑不了）"

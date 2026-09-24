@@ -262,10 +262,16 @@ def alert_cfg():
     """五个键的生效值：**环境变量 > indicator.ini `[html_alert]` > `ALERT_DEFAULTS`**。
 
     值为空串原样返回（那是他显式停用本项），不会被默认值顶回来；只有键根本不存在才落默认。
-    env 那一侧例外：`HTML_ALERT_AT=""` 这种「设了但设空」按没设处理，与 `apply_config()` 同一规矩。"""
+    env 那一侧默认按「设了但设空 = 没设」处理，与 `apply_config()` 同一规矩 —— **只有 `ALERT_AT` 例外**：
+    它在 ini 里留空的语义本来就是「不设时刻」（见 `html_gate`），所以 `HTML_ALERT_AT=""` 也照这个语义走。
+    `alert_cron.sh` 靠这个口子把「几点跑」整个交给 crontab 那五个字段，脚本自己不再判时刻。"""
     out = {}
     for k, dv in ALERT_DEFAULTS.items():
-        ev = (os.environ.get(ALERT_ENV[k]) or "").strip()
+        ev = os.environ.get(ALERT_ENV[k])
+        if k == "ALERT_AT" and ev is not None:
+            out[k] = ev.strip()                      # 显式设空 = 不设时刻；有值则覆盖 ini
+            continue
+        ev = (ev or "").strip()
         out[k] = ev if ev else indicator_get(ALERT_SECT, k, dv)
     return out
 

@@ -149,7 +149,7 @@ python api/notify.py --html-alert --send --force        # 跳过「不早于 ALE
 
 | 键（env 同名加前缀 `HTML_ALERT_`） | 现值 | 含义 |
 |---|---|---|
-| `ALERT_AT` | `08:10` | 每天的时刻，`hh:mm`（24 小时制，按**跑脚本那台机器的本地时区**）。语义是「不早于此时刻」：到点后第一次真评，08:10 那分钟机器没起来则 08:11 之后补。留空 = 不设时刻 |
+| `ALERT_AT` | `08:10` | 每天的时刻，`hh:mm`（24 小时制，按**跑脚本那台机器的本地时区**）。语义是「不早于此时刻」：到点后第一次真评，08:10 那分钟机器没起来则 08:11 之后补。留空 = 不设时刻。**走 `alert_cron.sh` 时这一档被脚本用空的 `HTML_ALERT_AT` 覆盖掉**，时刻以 crontab 为准 |
 | `ALERT_HITS` | `3` | 要求同时命中几项。`1`=任一、`2`=任意两项、`3`=三项全中；留空 = 有几项算几项全中（停用一项就按两项算） |
 | `AHR999_MAX` | `0.57` | 项① AHR999 定投指数：卡片头条值 `<=` 此数即满足。留空或写坏 = 停用本项 |
 | `FEAR_GREED_MIN` | `70` | 项② 恐慌贪婪指数：卡片头条值 `>=` 此数即满足。留空或写坏 = 停用本项 |
@@ -164,9 +164,13 @@ python api/notify.py --html-alert --send --force        # 跳过「不早于 ALE
 - **两道闸门都走在取数前面**：① 不早于 `ALERT_AT`；② **一个日历日只评一次**——触发发了要记，没触发也要记「今天评过了」，
   所以 cron 每分钟拉起一次，一天也只打一次上游。记录在 `data/notify_html_state.json`（已 gitignore，与 `--btc` 那份各记各的）。
   **预览（不带 `--send`）从不记账**，也照样能看数：看一眼配置不该把当天该播的提示哑掉。真发失败同样不记，下一分钟的 cron 自己再试。
+  2026-09-24 起 `alert_cron.sh` 把闸门①**关掉**（它 export 一个空的 `HTML_ALERT_AT`，`alert_cfg()` 对这个键认「设空 = 不设时刻」），
+  时刻整个交给 crontab 那五个字段；闸门②保留，因为它防的是**重复推送**不是早跑。`ALERT_TIME=1 ./alert_cron.sh` 把①加回来。
 - **收件人**：`[notify] tg_bot`（`--bot` 覆盖）。**这条路径不消耗 `[notify] daily_limit`**（那条只管 `--btc`），闸门②自己封顶。
-- **怎么挂**：cron 每分钟一次即可（脚本自己判时刻），`* * * * * cd ~/www && /usr/local/bin/python3 api/notify.py --html-alert --send >> logs/notify_cron.log 2>&1`。
-  时刻按服务器本地时区解释——**别猜偏移**，先在服务器上 `date`、或看主页「浏览器 − 服务端」那一格对一下再定 `ALERT_AT`。
+- **怎么挂**：走根目录的 `alert_cron.sh`（编码、日志、`PYTHONPATH` 三件事都靠它兜），crontab 只写绝对路径：
+  `10,40 8 * * *   /usr/home/myaibtc/domains/myaibtc.serv00.net/alert_cron.sh`。
+  两个时刻是「首发 + 兜底补发」，不是判两次——闸门②保证当天只可能发一条。
+  时刻按服务器本地时区解释——**别猜偏移**，先在服务器上 `date`、或看主页「浏览器 − 服务端」那一格对一下再定。
 - 与 `--btc` 一样，这条链也走 `btc.summary()`，所以顺带把 13 项读数 UPSERT 进库（见 7.3）。
 
 ## 5. 接口契约（/api/*）
@@ -275,10 +279,15 @@ stdout 也只在按需展开时显示；约束只有 `[report] daily_limit`（�
    （正在跑的脚本被自己覆盖会让 bash 的增量读取错位）、
    `api/Liquidity/_legacy/`、`api/USStockCrashMonitor/`；产物 `D:\Qorder_ws\damb-public-20260923.zip`（或同名 `.tgz`，文件名里的日期 = 打包当天）。
    Windows 上打的包**必须字节级验行尾**（`start_app.sh` 要 LF／无 BOM）。zip 不携带可执行位，但不用手工
-   `chmod +x` 一个个点名：`deploy_app.sh` 的「5.5 站点根所有 .sh 补执行位」会扫一遍根目录下的 `*.sh`
-   （`--reload` 也走这段，所以 scp 单独传上去的 `alert_cron.sh` / `shutdown_app.sh` 补一次 `--reload` 就点亮了）。
-   `alert_cron.sh` **必须**有 x 位：crontab 里它是直接当命令执行的，少 x 位＝每天一次静默 permission denied，
-   只有 cron 的邮件里露一下，`logs/notify_cron.log` 会连一行都没有。
+   `chmod +x` 一个个点名：`deploy_app.sh` 的「5.5 站点根所有 .sh：去 CR + 补执行位」会扫一遍根目录下的
+   `*.sh`，先把 Windows 上传带进来的 `\r` 就地剥掉、再补 x 位（`--reload` 也走这段，所以 scp 单独传上去的
+   `alert_cron.sh` / `shutdown_app.sh` 补跑一次 `--reload` 就治好了）。
+   两个必须治的理由：① `#!/bin/sh\r` 会让 FreeBSD 去找叫 `sh\r` 的解释器，报出来却是
+   `No such file or directory`（2026-09-24 在 s11 上 `./deploy_app.sh` 就是这么栽的）；② `alert_cron.sh`
+   **必须**有 x 位，crontab 里它是直接当命令执行的，少 x 位＝每天一次静默 permission denied，
+   只有 cron 的邮件里露一下，`logs/notify_cron.log` 连一行都没有。
+   本地侧已经从源头收口：仓库根加了 `.gitattributes`（`*.sh text eol=lf`），覆盖 `core.autocrlf=true`，
+   工作副本里的 `.sh` 从此就是 LF，scp 出去即可直接跑。
 2. 解到**站点根** `/usr/home/myaibtc/domains/myaibtc.serv00.net`（= `~/domains/...`，FreeBSD 上同处）：
    `tar -xf ~/damb-...zip`（FreeBSD 的 `tar` 就是 bsdtar，原生读 zip；兜底 `python -m zipfile -e <zip> <目标目录/>`）。
    第 1～3 步外加「重载 + 冒烟」已经写进根目录的 `deploy_app.sh`，站点根或 `~` 放着包时直接
