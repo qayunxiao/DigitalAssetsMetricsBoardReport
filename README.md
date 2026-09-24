@@ -39,7 +39,7 @@ DigitalAssetsMetricsBoard/
 ├── main.py                    本机入口：起 127.0.0.1 单一服务
 ├── passenger_wsgi.py          公网入口（serv00/Passenger 用面板指定的解释器 import 它），见第 7 节
 ├── config.ini                 运行配置（代理/端口/日志/页面开关/公网模式/落库），见第 4 节
-├── indicator.ini              出处项目（cryptoTrader）的配置快照 + 凭据副本；**2026-09-24 起它的 `[html_alert_top]`/`[html_alert_bottom]` 两段是运行时配置**——页面指标定时播报的阈值与每天时刻都在那里，见 4.1
+├── indicator.ini              出处项目（cryptoTrader）的配置快照 + 凭据副本；**2026-09-24 起它的 `[html_alert_top]`/`[html_alert_bottom]` 两段是运行时配置**——页面指标日报的阈值与每天时刻都在那里，见 4.1
 ├── local.ini                  可选：同目录、已 gitignore，`api/db.py` 读它优先于 `config.ini`（放口令用），没有这文件也照常跑
 ├── start_app.bat              Windows 一键启动（= python main.py --open）
 ├── start_app.sh               Linux／FreeBSD 启动器（本机模式用这个；优先它自己的 venv 解释器、不沿用 Windows 代理）
@@ -55,7 +55,7 @@ DigitalAssetsMetricsBoard/
 │   ├── liquidity.py           /api/liquidity/*   ├── crash.py      /api/crash/*
 │   ├── allocation.py          /api/allocation/*（资产配置页的取数全在这一个文件里，没有同名目录）
 │   ├── db.py                  可选落库层（MySQL 旁路 + `/api/db/health`）：建表、写入、状态自检
-│   ├── notify.py              Telegram 推送出口（`QA` / `ALVIN` 两个机器人，令牌读 `config.ini` 的 `[TG]`，见第 4 节；**没有任何 HTTP 接口调它**，BTC 极值播报走 `--btc`、三张卡定时播报走 `--html-alert` 命令行，阈值见 4.1）
+│   ├── notify.py              Telegram 推送出口（`QA` / `ALVIN` 两个机器人，令牌读 `config.ini` 的 `[TG]`，见第 4 节；**没有任何 HTTP 接口调它**，BTC 极值播报走 `--btc`、三张卡的指标日报走 `--html-alert` 命令行，阈值见 4.1）
 │   ├── Liquidity/             流动性模块详档（README.md 接口契约/阈值表、Qoder.md 审计纪律）与 _legacy/ 归档
 │   └── USStockCrashMonitor/   原 Streamlit 版归档（_legacy/，README.md 为旧版说明）
 ├── utils/                     cryptoTrader `utils/` 的仓库内只读副本（含 `operationMysql.py`），对照用、不参与 import，见 7.3
@@ -64,8 +64,7 @@ DigitalAssetsMetricsBoard/
 ├── data/risk_history.csv      崩盘页每日评分累积（同日覆盖）
 ├── data/report_quota.json     两个持仓报告的当日点击计数（crypto/us 各记各的，跨天自动作废，限次见 [report]）
 ├── data/notify_state.json     TG 播报的去重与每日限额记录（`api/notify.py`，见第 4 节；只留最近一条，删掉等于「今天没发过」）
-├── data/notify_html_top_state.json 定时播报「可能顶部」那段的当天记录（见 4.1；删掉等于「今天还没评」，当天会再打一次上游）
-├── data/notify_html_bottom_state.json 同上一条，但记的是「可能底部」那段（两本账互不挡路，这是拆两段的关键）
+├── data/notify_html_state.json 指标日报「今天已经发过」的那一本账（见 4.1；删掉等于「今天还没发」，当天会再打一次上游、多发一条）
 ├── data/daycache/             磁盘日缓存：每个缓存键一份「今天取到的原始结果」（见 7.4，可整目录删除）
 ├── logs/board_server.log      午夜轮转，保留 14 天
 └── Qoder.md                   给 agent 的项目约定（审计提示词、硬性纪律、边界）
@@ -117,11 +116,11 @@ DigitalAssetsMetricsBoard/
 python api/notify.py                                   # 只自检：两个机器人各问一次 getMe（只读，问 bot 自己是谁），不发任何消息
 python api/notify.py --text "测试正文"                  # 同上，外加把这条正文打印出来预览，仍不发
 python api/notify.py --send --bot QA --text "测试正文"   # 真发一条到 QA 那个群（--send 必须搭配 --bot，否则拒绝并退码 2）
-python api/notify.py --status                           # 纯本地：三条播报各自的当天记录（--btc + 顶部 + 底部）+ 今日额度 + 两段生效阈值，不打网络也不打库
+python api/notify.py --status                           # 纯本地：两本当天记录（--btc 极值播报 + 指标日报）+ 今日额度 + 两段的生效阈值，不打网络也不打库
 python api/notify.py --btc                              # BTC 极值播报：取数 → 挑卡 → 组正文 → 报会不会被闸门挡；**不发**
 python api/notify.py --btc --send                       # 真发（机器人取 `--bot`，没给就用 `[notify] tg_bot`）
 python api/notify.py --btc --send --force               # 连过两道闸门（同一业务日已发过时手工补发）
-python api/notify.py --html-alert                       # 页面指标定时播报：取数 → 三项判定 → 组正文，**顺带报「真到 cron 那一刻会不会被闸门挡」**；不发、不记账
+python api/notify.py --html-alert                       # 页面指标日报：取数 → 两段各自判定 → 并成一张表，**顺带报「真到 cron 那一刻会不会被闸门挡」**；不发、不记账
 python api/notify.py --html-alert --send                # 真发一条（cron 挂这条；时刻与阈值见 4.1）
 python api/notify.py --html-alert --send --force        # 跳过「不早于 ALERT_AT」和「一个日历日只评一次」（手工补发用）
 ```
@@ -142,50 +141,59 @@ python api/notify.py --html-alert --send --force        # 跳过「不早于 ALE
 
 **凭据的去处**：这条规矩在 2026-09-24 被用户**明示改口**过，现在的边界是「**该段口令可以入库，但任何接口/日志/聊天都不许回显**」。原先写的是「运行参数可以入库，口令不行」，因为 `config.ini` 是 git 跟踪文件、`deploy_app.sh` 又按 `git ls-files` 打上传包，写进去等于把口令发到公开仓库和公网机器上——这个后果今天**已经成立**：`[dingding]` `[TG]` 两段明文此刻在公开的 `origin/main` 里，也上了 serv00 那台机器。用户明知这一点仍要求这么做（原话：「确认要把明文密钥写进 config.ini 并提交到公开仓库，之后我BTC 相关指标需要发TG 需要使用到这样的功能」），所以要轮换/收回是他的动作，**后来的 agent 别默默把它改回去、也别不吭声地再往里加新凭据**。`[mysql] PASSWD` 那段的**书面**规矩仍是「优先 `local.ini` 或 `set MYSQL_PASSWD=…`，提交前先 `PASSWD =` 留空」；2026-09-23 曾把整段挪进 `local.ini`，同日按用户要求挪回 `config.ini` 并保留两级覆盖。**但 2026-09-24 核对：这段口令已经在公开的 `origin/main` 里了**（`git show origin/main:config.ini` 能查到那行 `PASSWD`，来自 `63b9101`），所以上一句「提交前清空」对历史已经无效——要么清空后重新提交、要么视同已泄露去轮换，这是他的动作，我们只提示不代执行。`COINGLASS_KEY` 从一开始就是纯环境变量（故意不进 `CONFIG_ENV`，也不写任何 ini），这条没变。另核对一笔：`indicator.ini`（出处项目的凭据快照）**并非**「已 gitignore 所以不在仓库里」——它早在 `63b9101` 就被跟踪，gitignore 只挡未跟踪文件，那批 CoinGlass/CryptoQuant Key、钉钉与 TG 令牌、TradingView 口令一直在远端历史里；要挡住得先 `git rm --cached indicator.ini` 再提交，且必须轮换。
 
-### 4.1 页面指标定时播报（`--html-alert`，阈值住在 `indicator.ini` 的 `[html_alert_top]` 与 `[html_alert_bottom]`）
+### 4.1 页面指标日报（`--html-alert`，阈值住在 `indicator.ini` 的 `[html_alert_top]` 与 `[html_alert_bottom]`）
 
-2026-09-24 用户要的功能：**每天定点盯看板那三张卡，命中就发 TG**，并且「这几档要能改配置不改代码」。
-同日第二次加口径：**拆成顶部/底部两段各自判、各自发**——`[html_alert_top]` 是「可能顶部」（阈值往高了判），
-`[html_alert_bottom]` 是「可能底部」（往低了判），两段**同一次取数、各判各的、各记各的账**，
-各自够数就各自发一条，消息正文是一张**等宽表格**（状态 / 指标 / 当前值 / 条件 / 数据日期 + 末尾一行缺口），
-头条写清「命中几 / 检测几项、要求几项」。
+2026-09-24 用户要的功能：**每天定点盯看板那三张卡**，并且「这几档要能改配置不改代码」。
+同日第二次加口径：拆成顶部/底部两段各自判、各自发。**同日第三次改口径 = 现在生效的这套**：
+`[html_alert_top]`（「可能顶部」，阈值往高了判）与 `[html_alert_bottom]`（「可能底部」，往低了判）**并成一条日报**——
+**不论触没触发，每天固定发一条**，正文是一张**等宽表格**：一行一张卡，列为
+「指标 / 当前值 / 数据日期 / 可能顶部 / 可能底部」（后两列 = 该段条件 + `✓`/`✗`），末尾一行缺口；
+头条每段各一行「命中几/几 · 有数几项 · 要求几项 → 触发/未触发」。
+于是 `ALERT_HITS` **只决定那句结论写什么，不再是发不发的开关**，记账也跟着并回**一本**。
 这是全站**唯一**一处把判级数值放进 ini 的地方（其余口径都在代码常量里，理由见 `Qoder.md` 第 2 节），
 所以引用下面这几个数之前**先重读那份文件**——他会手改。
 
 | 键（env 名 = `HTML_ALERT_TOP_…` / `HTML_ALERT_BOTTOM_…`） | 顶部段现值 | 底部段现值 | 含义 |
 |---|---|---|---|
 | `ALERT_AT` | `13:28` | `13:28` | 每天的时刻，`hh:mm`（24 小时制，按**跑脚本那台机器的本地时区**）。语义是「不早于此时刻」：到点后第一次真评，08:10 那分钟机器没起来则 08:11 之后补。留空 = 不设时刻。env 名是 `HTML_ALERT_TOP_AT` / `HTML_ALERT_BOTTOM_AT`（时刻这条不带键名）。**走 `alert_cron.sh` 时这一档被脚本用空的这两个变量覆盖掉**，时刻以 crontab 为准 |
-| `ALERT_HITS` | `1` | `1` | 该段要求同时命中几项。`1`=任一、`2`=任意两项、`3`=三项全中；留空 = 有几项算几项全中（停用一项就按两项算）。代码默认两段都是 `3`，现值是他手改的 |
-| `AHR999_MAX` | `0.57` | `0.4` | 项① AHR999 定投指数：卡片头条值 `<=` 此数即满足（两段同方向，只是数值不同）。留空或写坏 = 停用本项 |
+| `ALERT_HITS` | `1` | `1` | 该段算「触发」需要同时命中几项，**只写进正文那句结论、不决定发不发**。`1`=任一、`2`=任意两项、`3`=三项全中；留空 = 有几项算几项全中（停用一项就按两项算）。代码默认两段都是 `3`，现值是他手改的 |
+| `AHR999_MAX` | `0.67` | `0.4` | 项① AHR999 定投指数：卡片头条值 `<=` 此数即满足（两段同方向，只是数值不同）。留空或写坏 = 停用本项 |
 | `FEAR_GREED_MIN` | `70` | — | 项②（顶部）恐慌贪婪指数：头条值 `>=` 此数即满足。留空或写坏 = 停用本项 |
-| `FEAR_GREED_MAX` | — | `25` | 项②（底部）同一个卡，方向反过来：头条值 `<=` 此数即满足。**两段的键名不同不是笔误**——一个盯贪婪一个盯恐慌 |
+| `FEAR_GREED_MAX` | — | `20` | 项②（底部）同一个卡，方向反过来：头条值 `<=` 此数即满足。**两段的键名不同不是笔误**——一个盯贪婪一个盯恐慌 |
 | `TWM_CLOSE_ABOVE_SUPPORT` | `1` | — | 项③（顶部）2年MA乘数通道：**日线收盘** > 同一根上的支撑 730MA 即满足。没有数值阈值，`1`=启用、`0` 或留空=停用 |
-| `TWM_CLOSE_BELOW_SUPPORT` | — | `1` | 项③（底部）同一根、方向反过来：收盘 < 支撑 730MA |
+| `TWM_CLOSE_BELOW_SUPPORT` | — | `0`（当前停用） | 项③（底部）同一根、方向反过来：收盘 < 支撑 730MA |
 
 - **数从哪来**：`btc.summary()`，也就是 `staic/btc.html` 那一份，播报层**不重算任何指标**，只比大小。
   项③刻意不用首页那个多所现价中位数——收盘取通道卡 `bands` 最后一根的 `px`（Yahoo `BTC-USD` 日线），
   与同一根的 `lo` 比，两边日期必然一致；末行缺收盘就退到最近一根齐的，整列都不齐就是缺数据，**不外推**。
-  一次 tick 只调 `btc.summary()` **一次**，两张表用同一批数（分两段各取一遍等于把上游打两遍）。
+  一次 tick 只调 `btc.summary()` **一次**，两列判定用同一批数（分两段各取一遍等于把上游打两遍）。
 - **缺数怎么办**：取不到数的项记为「缺口」，既不算满足**也照样占该段 `ALERT_HITS` 的额**（写着 3 就要三项都成立）。
-  代价说清楚：某项长期挂掉会让这条播报长期沉默——遇到就修源，或把该段的 `ALERT_HITS` 调小／停用那一项，别改判定代码。
+  代价说清楚：并成日报之后缺数不再会让整条链哑掉——**当天照发**，那一格是 `—`、末尾单列进「缺口」，只是那段的结论变成「未触发」。
   「停用的项」（值为空/写坏）不占额，表格里两类都会列出来（`✓`/`✗`/`—`/`·`），列全三段数才读得出当时是什么状态。
-- **两道闸门都走在取数前面**：① 不早于该段 `ALERT_AT`；② 该段**一个日历日只评一次**——触发发了要记，没触发也要记「今天评过了」，
-  所以 cron 每分钟拉起一次，一天也只打一次上游。记录分两本：`data/notify_html_top_state.json` /
-  `data/notify_html_bottom_state.json`（已 gitignore，与 `--btc` 那份各记各的；**两段之间也各记各的**，
-  否则顶部评过一次会把当天的底部评估一起挡在门外）。**预览（不带 `--send`）从不记账**，也照样能看数：
-  看一眼配置不该把当天该播的提示哑掉。真发失败同样不记，下一分钟的 cron 自己再试。
-  两段都被闸门挡住时才做到**零上游**：只要有一段放行就打一次数、只评那一段。
+- **两道闸门都走在取数前面**：① 不早于各段 `ALERT_AT`（两段各写时刻时取**较晚**那个，早段没到点整条都不发）；
+  ② 日报**一个日历日只发一条**——这是「每天必发」之后唯一的防刷屏闸门，所以 cron 每分钟拉起一次，一天也只打一次上游。
+  记录只有**一本**：`data/notify_html_state.json`（已 gitignore，与 `--btc` 那份 `data/notify_state.json` 各记各的、
+  互不消耗；两段共用一本，因为它们本来就在同一条消息里。拆两段那一阵的 `..._top_state.json` / `..._bottom_state.json`
+  已经没人读了，留在服务器上无害）。**预览（不带 `--send`）从不记账**，也照样能看数：
+  看一眼配置不该把当天该发的日报哑掉。真发失败同样不记，下一分钟的 cron 自己再试；
+  只有「各段阈值全被停用」这种发了也没得比的情况会记一笔「没发」，为的是别让每分钟的 cron 反复打上游。
   2026-09-24 起 `alert_cron.sh` 把闸门①**关掉**（它 export 两个空的 `HTML_ALERT_TOP_AT` / `HTML_ALERT_BOTTOM_AT`，
   `alert_cfg()` 对这个键认「设空 = 不设时刻」），时刻整个交给 crontab 那五个字段；闸门②保留，因为它防的是**重复推送**不是早跑。
   `ALERT_TIME=1 ./alert_cron.sh` 把①加回来（两段一起加）。
-- **只跑一段**：`python api/notify.py --html-alert-top` / `--html-alert-bottom`（各自也能加 `--send`）；不带段名就是两段都判。
+- **日志里另有一行对照**：表后面跟着 `对照 [top] 键: 查询值 (设置阈值) 标记 ; …`（`alert_compare()`），顶部底部各一行，
+  进 `logs/notify_cron.log`，**不在 TG 正文里**——那张表要等宽对齐，流水串塞进去会把代码块撑歪。
+  跑 `--html-alert` 这条命令行时记得先 `set PYTHONIOENCODING=utf-8`（同 `alert_cron.sh` 里那两行），
+  否则 Windows 的 GBK 控制台会在 `✓` 上当场 `UnicodeEncodeError`。
+- **只出一段的条件列**：`python api/notify.py --html-alert-top` / `--html-alert-bottom`（各自也能加 `--send`）；
+  不带段名就是两段都并进来。当前值那几列照旧，**账本也是共用的**——单独发过一段，当天那条完整日报就一并算发过了。
 - **收件人**：`[notify] tg_bot`（`--bot` 覆盖）。**这条路径不消耗 `[notify] daily_limit`**（那条只管 `--btc`），闸门②自己封顶。
 - **怎么挂**：走根目录的 `alert_cron.sh`（编码、日志、`PYTHONPATH` 三件事都靠它兜），crontab 只写绝对路径：
   `10,40 8 * * *   /usr/home/myaibtc/domains/myaibtc.serv00.net/alert_cron.sh`。
-  两个时刻是「首发 + 兜底补发」，不是判两次——每段的闸门②保证当天每段最多发一条（所以一天最多两条：顶部一条、底部一条）。
-  **两段同日都发是常态不是异常**：2026-09-24 的预览实测就是顶部中 2/3、底部中 1/3（底部那 1 项只是「收盘 < 支撑 730MA」，
-  而当天恐慌 71 与 AHR999 0.569 都偏贪婪/偏中性）——`ALERT_HITS = 1` 配在底部段等于「只要价格还在支撑下面，每天提醒一次」。
-  想要真共振就把该段调到 2 或 3，别改判定代码。
+  两个时刻是「首发 + 兜底补发」，不是判两次——闸门②保证**一天最多一条日报**。
+  **两列判定互相矛盾是常态不是异常**：2026-09-24 实测就是顶部「AHR999 0.569 ✓ + 恐慌 71 ✓」中 2/3、
+  底部中 0/2（底部那两项一个要恐慌 <=20、一个要收盘 < 支撑，而当天恐慌正在贪婪区）——
+  `ALERT_HITS = 1` 配在顶部段等于「AHR999 一个偏便宜的数就能点亮可能顶部」，现在它就摆在同一行的两列里，谁中谁没中一眼看得见。
+  想要真共振就把那段的 `ALERT_HITS` 调到 2 或 3，别改判定代码。
   时刻按服务器本地时区解释——**别猜偏移**，先在服务器上 `date`、或看主页「浏览器 − 服务端」那一格对一下再定。
 - 与 `--btc` 一样，这条链也走 `btc.summary()`，所以顺带把 13 项读数 UPSERT 进库（见 7.3）。
 - **表格能对齐的唯一前提是等宽**：所以这条链路的 `sendMessage` 带 `parse_mode=Markdown` + ``` 代码块
@@ -305,8 +313,10 @@ stdout 也只在按需展开时显示；约束只有 `[report] daily_limit`（�
    `No such file or directory`（2026-09-24 在 s11 上 `./deploy_app.sh` 就是这么栽的）；② `alert_cron.sh`
    **必须**有 x 位，crontab 里它是直接当命令执行的，少 x 位＝每天一次静默 permission denied，
    只有 cron 的邮件里露一下，`logs/notify_cron.log` 连一行都没有。
-   本地侧已经从源头收口：仓库根加了 `.gitattributes`（`*.sh text eol=lf`），覆盖 `core.autocrlf=true`，
-   工作副本里的 `.sh` 从此就是 LF，scp 出去即可直接跑。
+   本地侧**没有**收口：仓库根没有 `.gitattributes`，`core.autocrlf=true` 下工作副本里的 `*.sh` 就是带 `\r` 的 CRLF，
+   scp／打包上去也带着它。所以行尾这件事**完全由上面那段 deploy 的 5.5 兜底**——包里的 `\r` 无害，前提是服务器端
+   真的跑过 `deploy_app.sh`（或 `--reload`）。绕开它手工上传 `.sh` 就是自己承担 `sh\r` 那个报错，别去加 `.gitattributes`
+   装作问题在源头解决了：那只会让已经检出的工作副本继续是 CRLF，除非同时重 checkout 一遍。
 2. 解到**站点根** `/usr/home/myaibtc/domains/myaibtc.serv00.net`（= `~/domains/...`，FreeBSD 上同处）：
    `tar -xf ~/damb-...zip`（FreeBSD 的 `tar` 就是 bsdtar，原生读 zip；兜底 `python -m zipfile -e <zip> <目标目录/>`）。
    第 1～3 步外加「重载 + 冒烟」已经写进根目录的 `deploy_app.sh`，站点根或 `~` 放着包时直接
