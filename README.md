@@ -332,6 +332,11 @@ stdout 也只在按需展开时显示；约束只有 `[report] daily_limit`（�
    `passenger-`（那是 Passenger 的 spawner）、`notify.py`（cron 正在发的日报，杀了白扔一轮上游）。
    解压前会把服务器上的 `config.ini` 备份成 `config.ini.bak.<时间戳>`。
    **这个脚本不在上传包里**，要单独传（脚本自己覆盖自己会让 bash 读到半截，历史上真出过这种事故）。
+   单独传上来的一定是 Windows 的 CRLF 那份，而 5.5 段只扫**站点根**、不管 `~` 下这份，所以：
+   `./deploy_app.sh` 直接执行会被内核当成解释器名带 `\r`，报一行 `: No such file or directory`
+   （2026-09-25 实测）。引导一次的命令是 `tr -d '\r' < ~/deploy_app.sh > /tmp/d.sh && bash /tmp/d.sh`；
+   脚本第 0 步现在自己复制时就去 CR，所以**之后**用 `bash ~/deploy_app.sh` 直接跑也行，
+   但 `~` 下那份要恢复可执行还得手工 `tr` + `chmod +x` 一次。
    注意「服务在不在跑」不能拿 `ps` 当判据（Passenger 按需拉起，空闲时一个进程都没有），也不能拿
    `devil www list`（2026-09-24 实测那份输出只有域名/类型/路径三列，**没有状态列**）；看 `/api/health`。
 3. 站点根下面板自建的 `public_python/`（其 `public/` 是 nginx docroot）与 `public_php/` 里**不要留任何 HTML**，

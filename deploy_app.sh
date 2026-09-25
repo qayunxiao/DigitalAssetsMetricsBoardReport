@@ -45,12 +45,21 @@
 
 set -euo pipefail
 
-# ---------- 0. 先把自已复制一份再执行 ----------
+# ---------- 0. 先把自已复制一份再执行（顺带去 CR）----------
 # git pull 会改掉仓库里这份**正在被 bash 逐行读取**的脚本（bash 边读边执行，改了就跑飞），
 # 所以第一件事是换一个 git 碰不到的副本继续跑。
+# 用 `tr -d '\r'` 而不是 `cp`：这份脚本历来是 scp 手工传上去的（不在上传包里），Windows 那份带 CRLF，
+# bash 会把行尾的 \r 当成该行最后一个 token 的一部分 —— SITE 变成 "…serv00.net\r"、cd 当场失败。
+# ⚠ 这只救 `bash deploy_app.sh`：`./deploy_app.sh` 直接执行时，shebang 里的 \r 是**内核**先读到的，
+#    报出来是一行 `: No such file or directory`（2026-09-25 在 s11 上就是这么栽的），
+#    那次只能自己 `tr -d '\r' < deploy_app.sh > /tmp/d.sh && bash /tmp/d.sh` 引导一遍；
+#    跑通之后 5.5 段会把站点根下的 .sh 全治干净（`~` 下那份不归它管，顺手也 tr 一次 + chmod +x）。
 if [ -z "${DAMB_DEPLOY_TMP:-}" ]; then
   t="${TMPDIR:-/tmp}/damb_deploy_$$.sh"
-  cp "$0" "$t"
+  if ! tr -d '\r' < "$0" > "$t"; then
+    echo "!! 复制自身到 $t 失败（tr 读不了 $0？磁盘/权限）" >&2
+    rm -f "$t"; exit 1
+  fi
   rc=0
   DAMB_DEPLOY_TMP="$t" bash "$t" "$@" || rc=$?
   rm -f "$t"
